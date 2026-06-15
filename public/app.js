@@ -1,9 +1,15 @@
+import { getCurrentIdToken, initAuthUi } from './firebase-client.js';
+
 // ---- websocket ---------------------------------------------------------------
 const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 let ws;
 
-function connect() {
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+async function connect() {
+  const wsUrl = new URL(window.TALK2ME_WS_URL || `${proto}://${location.host}/ws`);
+  const token = await getCurrentIdToken();
+  if (token) wsUrl.searchParams.set('token', token);
+
+  ws = new WebSocket(wsUrl);
   ws.onopen = () => setStatus('Connecting to your friends…');
   ws.onclose = () => {
     setStatus('Disconnected. Reconnecting…');
@@ -13,9 +19,19 @@ function connect() {
   ws.onmessage = (ev) => handleServer(JSON.parse(ev.data));
 }
 
+window.addEventListener('talk2me:auth-changed', () => {
+  wsReady = false;
+  if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) {
+    ws.close();
+  } else {
+    connect();
+  }
+});
+
 function handleServer(m) {
   switch (m.type) {
     case 'ready':
+      wsReady = true;
       if (!started) {
         startBtn.hidden = false;
         setStatus('Ready when you are');
@@ -38,7 +54,7 @@ function handleServer(m) {
       setStatus(`${m.name} is speaking…`, `speaking-${m.name}`);
       break;
     case 'searching':
-      setStatus(`🔎 ${m.name} is looking that up…`, `speaking-${m.name}`);
+      setStatus(`${m.name} is looking that up...`, `speaking-${m.name}`);
       break;
     case 'audio':
       playPcm(bytesFromBase64(m.data));
@@ -51,50 +67,95 @@ function handleServer(m) {
       setStatus('Ready — hold to talk');
       break;
     case 'error':
-      setStatus(`⚠ ${m.message}`);
+      setStatus(m.message);
       break;
   }
 }
 
 // ---- UI ----------------------------------------------------------------------
+const welcomeEl = document.getElementById('welcome');
+const callEl = document.getElementById('call');
 const transcriptEl = document.getElementById('transcript');
 const statusEl = document.getElementById('status');
 const talkBtn = document.getElementById('talk');
 const startBtn = document.getElementById('start');
+const backBtn = document.getElementById('back');
+const firstNameInput = document.getElementById('first-name');
+const nameInline = document.getElementById('name-inline');
 
 let currentSpeaker = null;
 let userBubble = null;
 let respBubble = null;
 let started = false;
+let wsReady = false;
+
+initAuthUi();
 
 // First gesture: unlock audio, prime the mic, and ask the coaches to open.
 startBtn.addEventListener('click', async () => {
-  started = true;
+  const firstName = firstNameInput.value.trim();
+  nameInline.textContent = firstName ? `, ${firstName}` : '';
+  welcomeEl.hidden = true;
+  callEl.hidden = false;
   startBtn.hidden = true;
   ensurePlayCtx();
-  await ensureMic();
+  const ok = await ensureMic();
+  if (!ok) {
+    startBtn.hidden = false;
+    return;
+  }
   if (micCtx?.state === 'suspended') await micCtx.resume();
-  talkBtn.disabled = false;
-  setStatus('Starting…');
-  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'begin' }));
+
+  talkBtn.disabled = !wsReady;
+  setStatus(wsReady ? 'Ready — hold to talk' : 'Starting…');
+
+  if (!started && ws?.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'begin' }));
+    started = true;
+  }
+});
+
+firstNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !startBtn.hidden) startBtn.click();
+});
+
+backBtn.addEventListener('click', () => {
+  callEl.hidden = true;
+  welcomeEl.hidden = false;
+  startBtn.hidden = false;
 });
 
 function setStatus(text, cls = '') {
   statusEl.textContent = text;
   statusEl.className = `status ${cls}`;
+  if (text === 'Ready — hold to talk' || text === 'Ready when you are') {
+    resetTalkButtonLabel();
+  }
 }
 
 function addBubble(cls, who) {
   const el = document.createElement('div');
   el.className = `bubble ${cls}`;
-  if (who) {
+
+  if (who && who !== 'You') {
+    const row = document.createElement('div');
+    row.className = 'who-row';
+
+    const avatar = document.createElement('span');
+    avatar.className = 'mini-avatar';
+    avatar.textContent = who.slice(0, 1);
+    row.appendChild(avatar);
+
     const w = document.createElement('span');
     w.className = 'who';
     w.textContent = who;
-    el.appendChild(w);
+    row.appendChild(w);
+
+    el.appendChild(row);
   }
+
   const body = document.createElement('span');
-  body.className = 'body';
+  body.className = 'body bubble-inner';
   el.appendChild(body);
   transcriptEl.appendChild(el);
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
@@ -178,7 +239,7 @@ async function ensureMic() {
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
     });
   } catch (err) {
-    setStatus('⚠ Microphone permission needed');
+    setStatus('Microphone permission needed');
     return false;
   }
   micCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
@@ -216,6 +277,8 @@ async function startTalking() {
 
   recording = true;
   talkBtn.classList.add('recording');
+  talkBtn.querySelector('.talk-label').textContent = 'Listening...';
+  talkBtn.querySelector('.talk-hint').textContent = "release when you're done";
   setStatus('Listening…', 'listening');
 
   // user's bubble first, so it sits above the reply
@@ -230,6 +293,8 @@ function stopTalking() {
   if (!recording) return;
   recording = false;
   talkBtn.classList.remove('recording');
+  talkBtn.querySelector('.talk-label').textContent = 'Thinking...';
+  talkBtn.querySelector('.talk-hint').textContent = 'waiting for a reply';
   setStatus('Thinking…');
   // tell the worklet to flush; it will post {ended} which sends mic_end for us
   workletNode?.port.postMessage({ cmd: 'stop' });
@@ -252,6 +317,11 @@ window.addEventListener('keyup', (e) => {
     stopTalking();
   }
 });
+
+function resetTalkButtonLabel() {
+  talkBtn.querySelector('.talk-label').textContent = 'Hold to talk';
+  talkBtn.querySelector('.talk-hint').textContent = 'or hold the spacebar';
+}
 
 // ---- base64 <-> bytes --------------------------------------------------------
 function base64FromBytes(bytes) {

@@ -3,33 +3,107 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>voicefriend — practice English with Luc & Jeenie</title>
+    <title>talk2me</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <header>
-      <h1>voicefriend</h1>
-      <p class="tagline">Talking with <span class="luc">Luc</span> and <span class="jeenie">Jeenie</span></p>
-      <div class="mode">
-        <label><input type="radio" name="mode" value="coaching" checked /> Coaching</label>
-        <label><input type="radio" name="mode" value="free" /> Free chat</label>
-      </div>
-    </header>
+    <div id="root">
+      <section id="welcome" class="welcome" aria-label="Welcome">
+        <div class="welcome-top">
+          <div class="duo-dots" aria-hidden="true">
+            <span class="dot luc-dot"></span>
+            <span class="dot jeenie-dot"></span>
+          </div>
+          <div class="wordmark" aria-label="talk2me">
+            <span>talk</span><span class="wordmark-gradient">2me</span>
+          </div>
+          <p class="welcome-copy">Practice spoken English with two AI friends who actually talk back.</p>
 
-    <main id="transcript" aria-live="polite"></main>
+          <div class="coach-pair" aria-label="Coaches">
+            <div class="coach-card">
+              <span class="avatar avatar-luc">L</span>
+              <strong>Luc</strong>
+              <span>keeps it flowing</span>
+            </div>
+            <div class="coach-card">
+              <span class="avatar avatar-jeenie">J</span>
+              <strong>Jeenie</strong>
+              <span>sharpens your words</span>
+            </div>
+          </div>
+        </div>
 
-    <footer>
-      <div id="status" class="status">Connecting…</div>
-      <button id="start" class="talk" hidden>
-        <span class="talk-label">▶ Start</span>
-        <span class="talk-hint">Luc &amp; Jeenie will ask you something</span>
-      </button>
-      <button id="talk" class="talk" disabled>
-        <span class="talk-label">Hold to talk</span>
-        <span class="talk-hint">or hold the spacebar</span>
-      </button>
-    </footer>
+        <div class="welcome-actions">
+          <input id="first-name" type="text" autocomplete="given-name" placeholder="Your first name (optional)" />
+          <div class="auth-panel" aria-label="Account">
+            <div id="auth-status" class="auth-status">Not signed in</div>
+            <div class="auth-actions">
+              <button id="google-signin" class="secondary-action" type="button">Google</button>
+              <button id="email-link" class="secondary-action" type="button">Email link</button>
+              <button id="signout" class="secondary-action" type="button" hidden>Sign out</button>
+            </div>
+          </div>
+          <button id="start" class="primary-action" hidden>
+            <span class="mic-icon" aria-hidden="true"></span>
+            <span>Start talking</span>
+          </button>
+          <p>Luc &amp; Jeenie will ask you something to kick things off</p>
+        </div>
+      </section>
 
-    <script src="app.js"></script>
+      <section id="call" class="call" aria-label="Conversation" hidden>
+        <header class="app-header">
+          <div class="header-row">
+            <button id="back" class="plain-button" type="button">Back</button>
+            <div class="wordmark wordmark-small" aria-label="talk2me">
+              <span>talk</span><span class="wordmark-gradient">2me</span>
+            </div>
+            <button class="icon-button" type="button" aria-label="Settings">
+              <span class="gear-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+          <p class="tagline">
+            Talking with <span class="luc">Luc</span> &amp; <span class="jeenie">Jeenie</span><span id="name-inline"></span>
+          </p>
+          <div class="mode" role="radiogroup" aria-label="Conversation mode">
+            <label>
+              <input type="radio" name="mode" value="coaching" checked />
+              <span>Coaching</span>
+            </label>
+            <label>
+              <input type="radio" name="mode" value="free" />
+              <span>Free chat</span>
+            </label>
+          </div>
+        </header>
+
+        <main id="transcript" aria-live="polite"></main>
+
+        <footer class="app-footer">
+          <div id="status" class="status">Connecting...</div>
+          <button id="talk" class="talk" disabled>
+            <span class="talk-main">
+              <span class="mic-icon" aria-hidden="true"></span>
+              <span class="talk-label">Hold to talk</span>
+            </span>
+            <span class="talk-hint">or hold the spacebar</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <script>
+      window.TALK2ME_FIREBASE_CONFIG = {
+        apiKey: "AIzaSyCoUMMeMcaDQXDmNtamXg7QNkt710GxTu4",
+        authDomain: "talk2me-e90b1.firebaseapp.com",
+        projectId: "talk2me-e90b1",
+        storageBucket: "talk2me-e90b1.firebasestorage.app",
+        messagingSenderId: "46244441987",
+        appId: "1:46244441987:web:742f95ce61afb8e610d0b6",
+        measurementId: "G-0YM8LCGP16"
+      };
+      window.TALK2ME_WS_URL = "wss://talk2me-relay-l2a45sbrxq-uc.a.run.app/ws";
+    </script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

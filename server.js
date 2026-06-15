@@ -6,6 +6,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { MODEL, VOICES, PORT } from './config.js';
 import { buildSystemInstruction, getStarter } from './prompt.js';
 import { loadProfile, saveProfile, profileContext, appendTranscript } from './storage.js';
+import { authenticateWebSocketRequest, REQUIRE_FIREBASE_AUTH } from './auth.js';
 
 const LOG_TRANSCRIPTS = process.env.LOG_TRANSCRIPTS === '1'; // set LOG_TRANSCRIPTS=1 to also print to console
 const LOG_TO_FILE = process.env.LOG_TO_FILE !== '0'; // transcripts → data/transcript.jsonl (on by default)
@@ -48,8 +49,9 @@ const CHARACTERS = ['Luc', 'Jeenie'];
 
 // --- one of these per connected browser tab -----------------------------------
 class Conversation {
-  constructor(browser) {
+  constructor(browser, identity = { anonymous: true }) {
     this.browser = browser;
+    this.identity = identity;
     this.ai = new GoogleGenAI({ apiKey: API_KEY });
     this.mode = 'coaching';
     this.sessions = {}; // name -> live session
@@ -328,13 +330,31 @@ class Conversation {
 
 // --- wire up express + websocket on one port ----------------------------------
 const app = express();
+
+app.get('/healthz', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.use(express.static('public'));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-wss.on('connection', (browser) => {
-  const conv = new Conversation(browser);
+wss.on('connection', async (browser, req) => {
+  let identity;
+  try {
+    identity = await authenticateWebSocketRequest(req);
+  } catch (err) {
+    browser.send(JSON.stringify({ type: 'error', message: 'Sign in required.' }));
+    browser.close(1008, 'auth_required');
+    return;
+  }
+
+  const conv = new Conversation(browser, identity);
   browser.on('message', (raw) => conv.handleBrowserMessage(raw));
   browser.on('close', () => conv.close());
   browser.on('error', () => conv.close());
@@ -344,4 +364,5 @@ server.listen(PORT, () => {
   console.log(`\n  voicefriend running → http://localhost:${PORT}`);
   console.log(`  model: ${MODEL}`);
   console.log(`  voices: Luc=${VOICES.Luc}  Jeenie=${VOICES.Jeenie}\n`);
+  console.log(`  firebase auth required: ${REQUIRE_FIREBASE_AUTH ? 'yes' : 'no'}\n`);
 });
