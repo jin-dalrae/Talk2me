@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>voicefriend — practice English with Luc & Jeenie</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>voicefriend</h1>
+      <p class="tagline">Talking with <span class="luc">Luc</span> and <span class="jeenie">Jeenie</span></p>
+      <div class="mode">
+        <label><input type="radio" name="mode" value="coaching" checked /> Coaching</label>
+        <label><input type="radio" name="mode" value="free" /> Free chat</label>
+      </div>
+    </header>
+
+    <main id="transcript" aria-live="polite"></main>
+
+    <footer>
+      <div id="status" class="status">Connecting…</div>
+      <button id="start" class="talk" hidden>
+        <span class="talk-label">▶ Start</span>
+        <span class="talk-hint">Luc &amp; Jeenie will ask you something</span>
+      </button>
+      <button id="talk" class="talk" disabled>
+        <span class="talk-label">Hold to talk</span>
+        <span class="talk-hint">or hold the spacebar</span>
+      </button>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>

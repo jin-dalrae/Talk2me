@@ -1,0 +1,19 @@
+{
+  "name": "voicefriend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Practice spoken English with two AI friends — Luc and Jeenie — over the Gemini Live API. They chat with you in their own real voices and gently upgrade your vocabulary.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google/genai": "^2.8.0",
+    "express": "^5.2.1",
+    "ws": "^8.21.0"
+  }
+}

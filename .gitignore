@@ -1,0 +1,26 @@
+# Secrets — never commit your Gemini API key
+.env
+.env.local
+.env.*.local
+
+# Local personal data — transcripts and your remembered profile
+data/
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Build / runtime
+dist/
+.cache/
