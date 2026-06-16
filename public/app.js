@@ -6,11 +6,12 @@ let ws;
 
 async function connect() {
   const wsUrl = new URL(window.TALK2ME_WS_URL || `${proto}://${location.host}/ws`);
-  const token = await getCurrentIdToken();
-  if (token) wsUrl.searchParams.set('token', token);
 
   ws = new WebSocket(wsUrl);
-  ws.onopen = () => setStatus('Connecting to your friends…');
+  ws.onopen = () => {
+    setStatus('Connecting to your friends…');
+    sendAuthIfAvailable();
+  };
   ws.onclose = () => {
     setStatus('Disconnected. Reconnecting…');
     talkBtn.disabled = true;
@@ -69,6 +70,11 @@ function handleServer(m) {
     case 'error':
       setStatus(m.message);
       break;
+    case 'auth_ok':
+      break;
+    case 'auth_error':
+      setStatus(m.message);
+      break;
   }
 }
 
@@ -90,6 +96,12 @@ let started = false;
 let wsReady = false;
 
 initAuthUi();
+
+async function sendAuthIfAvailable() {
+  if (ws?.readyState !== WebSocket.OPEN) return;
+  const token = await getCurrentIdToken();
+  if (token) ws.send(JSON.stringify({ type: 'auth', token }));
+}
 
 // First gesture: unlock audio, prime the mic, and ask the coaches to open.
 startBtn.addEventListener('click', async () => {

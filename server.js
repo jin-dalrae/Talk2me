@@ -6,7 +6,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { MODEL, VOICES, PORT } from './config.js';
 import { buildSystemInstruction, getStarter } from './prompt.js';
 import { loadProfile, saveProfile, profileContext, appendTranscript } from './storage.js';
-import { authenticateWebSocketRequest, REQUIRE_FIREBASE_AUTH } from './auth.js';
+import { authenticateWebSocketRequest, verifyFirebaseIdToken, REQUIRE_FIREBASE_AUTH } from './auth.js';
 
 const LOG_TRANSCRIPTS = process.env.LOG_TRANSCRIPTS === '1'; // set LOG_TRANSCRIPTS=1 to also print to console
 const LOG_TO_FILE = process.env.LOG_TO_FILE !== '0'; // transcripts → data/transcript.jsonl (on by default)
@@ -246,6 +246,10 @@ class Conversation {
       return;
     }
     switch (m.type) {
+      case 'auth': {
+        this.verifyClientToken(m.token);
+        break;
+      }
       case 'begin': {
         this.startConversation();
         break;
@@ -287,6 +291,21 @@ class Conversation {
         }
         break;
       }
+    }
+  }
+
+  async verifyClientToken(token) {
+    if (!token) {
+      this.send({ type: 'auth_error', message: 'Missing Firebase ID token.' });
+      return;
+    }
+
+    try {
+      this.identity = await verifyFirebaseIdToken(token, { required: true });
+      this.send({ type: 'auth_ok' });
+    } catch (err) {
+      console.warn(`Firebase auth message failed: ${err?.message || err}`);
+      this.send({ type: 'auth_error', message: 'Sign-in could not be verified.' });
     }
   }
 

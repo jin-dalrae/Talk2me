@@ -25,7 +25,8 @@ Implemented:
 - Talk2Me design system from `talk2me-app.html`.
 - Firebase Hosting on the separate site `talk-to-me1`.
 - Firebase Auth UI for Google sign-in and email-link sign-in.
-- Firebase ID token forwarding to `/ws` when a user is signed in.
+- Firebase ID token forwarding over the established WebSocket when a user is
+  signed in.
 - Firebase Admin scaffolding in the relay.
 - Firestore database, rules, and indexes in `talk2me-e90b1`.
 
@@ -100,6 +101,7 @@ PORT=3000
 FIREBASE_PROJECT_ID=talk2me-e90b1
 FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
 REQUIRE_FIREBASE_AUTH=0
+OPTIONAL_AUTH_TIMEOUT_MS=5000
 
 # Local prototype persistence
 LOG_TO_FILE=1
@@ -107,8 +109,10 @@ LOG_TRANSCRIPTS=0
 REMEMBER=1
 ```
 
-Set `REQUIRE_FIREBASE_AUTH=1` only after the relay is fully Firestore-backed and
-the auth providers are confirmed in Firebase.
+When `REQUIRE_FIREBASE_AUTH=0`, token verification is best-effort and falls back
+to anonymous mode if verification times out. Set `REQUIRE_FIREBASE_AUTH=1` only
+after the relay is fully Firestore-backed and token verification is confirmed in
+Cloud Run.
 
 ## Deploy
 

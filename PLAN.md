@@ -278,7 +278,7 @@ Everything else (all code, Firestore rules, local emulator testing) is automated
   - Firebase Web SDK initialized from the `talk2me-e90b1` config
   - Google sign-in button
   - email-link sign-in button
-  - signed-in users attach ID tokens to future `/ws` connections
+  - signed-in users send ID tokens over the established WebSocket
   - deployed to `https://talk-to-me1.web.app`
 - [x] Talk2Me Firestore created and secured:
   - Project: `talk2me-e90b1`
@@ -291,6 +291,14 @@ Everything else (all code, Firestore rules, local emulator testing) is automated
 - [x] Firebase Auth is available for `talk2me-e90b1`:
   - Google sign-in provider available
   - Email-link sign-in available
+- [x] Authenticated deployed voice loop verified:
+  - `.env` test account signs in through Firebase Auth REST API
+  - browser-style WebSocket auth message returns `auth_ok`
+  - relay reaches `ready`
+  - opener completes
+  - synthesized speech sample streams through `/ws`
+  - coach response returns audio and transcript
+  - tokens are not sent in WebSocket URLs
 
 ### Still left before this is a SaaS
 
