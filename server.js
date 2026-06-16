@@ -62,6 +62,7 @@ class Conversation {
     this.seen = { Luc: 0, Jeenie: 0 }; // how far each coach has been caught up
     this.greeted = false;
     this.profile = null; // what we remember about the user
+    this.jobDescription = null; // interview-drill mode: pasted job description
     this.authed = false;
     this.sessionId = null;
 
@@ -122,7 +123,7 @@ class Conversation {
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICES[name] } },
         },
-        systemInstruction: buildSystemInstruction(name, this.mode),
+        systemInstruction: buildSystemInstruction(name, this.mode, { jobDescription: this.jobDescription }),
         inputAudioTranscription: {},
         outputAudioTranscription: {},
         // Let them look things up on the web mid-conversation.
@@ -202,6 +203,8 @@ class Conversation {
   // Swap this out later for a smart router (e.g. classify the user's words).
   pickResponder() {
     if (!this.lastSpeaker) return this.mode === 'coaching' ? 'Jeenie' : 'Luc';
+    // Interview drill: strict turns — the OTHER coach asks the next question.
+    if (this.mode === 'interview') return this.lastSpeaker === 'Luc' ? 'Jeenie' : 'Luc';
     const stay = Math.random() < 0.3;
     if (stay) return this.lastSpeaker;
     return this.lastSpeaker === 'Luc' ? 'Jeenie' : 'Luc';
@@ -247,6 +250,10 @@ class Conversation {
   // One of the coaches greets the user and asks a random opener to kick things off.
   startConversation() {
     if (this.greeted) return;
+    if (this.mode === 'interview') {
+      this.beginInterview();
+      return;
+    }
     this.greeted = true;
     const opener = Math.random() < 0.5 ? 'Luc' : 'Jeenie';
     const session = this.sessions[opener];
@@ -265,6 +272,31 @@ class Conversation {
       });
     } catch (e) {
       console.error('startConversation failed:', e?.message || e);
+    }
+  }
+
+  // Kick off (or restart) the interview drill: one coach greets and asks the
+  // first question from the job description. Re-runnable when the user switches
+  // into interview mode mid-session.
+  beginInterview() {
+    this.greeted = true;
+    const opener = Math.random() < 0.5 ? 'Luc' : 'Jeenie';
+    const session = this.sessions[opener];
+    if (!session) return;
+    this.responder = opener;
+    this.lastSpeaker = opener; // so the OTHER coach asks the next question
+    this.userTurnText = '';
+    this.respTurnText = '';
+    this.send({ type: 'speaker', name: opener });
+    const namePart = this.profile?.name ? ` Greet them by name, ${this.profile.name},` : '';
+    const instruction = `Begin the interview now.${namePart} In one short sentence, warmly acknowledge the role they're preparing for, then ask your FIRST interview question based on the job description. Ask only one question and keep it natural and spoken.`;
+    try {
+      session.sendClientContent({
+        turns: [{ role: 'user', parts: [{ text: instruction }] }],
+        turnComplete: true,
+      });
+    } catch (e) {
+      console.error('beginInterview failed:', e?.message || e);
     }
   }
 
@@ -334,10 +366,17 @@ class Conversation {
         break;
       }
       case 'mode': {
-        const mode = m.mode === 'free' ? 'free' : 'coaching';
-        if (mode !== this.mode) {
-          this.mode = mode;
-          this.reconnect(); // system prompt changes, so re-open both sessions
+        const mode = ['free', 'interview', 'coaching'].includes(m.mode) ? m.mode : 'coaching';
+        const jd = typeof m.jobDescription === 'string' ? m.jobDescription : this.jobDescription;
+        const changed = mode !== this.mode || (mode === 'interview' && jd !== this.jobDescription);
+        this.mode = mode;
+        this.jobDescription = jd;
+        if (changed) {
+          // System prompt (and the job description) changed, so re-open both
+          // sessions, then kick off the first interview question if entering the drill.
+          this.reconnect().then(() => {
+            if (this.mode === 'interview') this.beginInterview();
+          });
         }
         break;
       }

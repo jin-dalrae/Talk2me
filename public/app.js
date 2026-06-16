@@ -222,14 +222,36 @@ function setBubbleText(el, text) {
 }
 
 // ---- mode toggle -------------------------------------------------------------
+const jdPanel = document.getElementById('jd-panel');
+const jdInput = document.getElementById('jd-input');
+const jdStart = document.getElementById('jd-start');
+
 document.querySelectorAll('input[name="mode"]').forEach((r) => {
   r.addEventListener('change', (e) => {
-    if (e.target.checked && ws?.readyState === 1) {
-      ws.send(JSON.stringify({ type: 'mode', mode: e.target.value }));
+    if (!e.target.checked) return;
+    const mode = e.target.value;
+    if (mode === 'interview') {
+      // Reveal the paste box; the drill starts on the "Start interview drill" button.
+      if (jdPanel) jdPanel.hidden = false;
+      if (jdInput) jdInput.focus();
+      return;
+    }
+    if (jdPanel) jdPanel.hidden = true;
+    if (ws?.readyState === 1) {
+      ws.send(JSON.stringify({ type: 'mode', mode }));
       setStatus('Switching mode…');
       talkBtn.disabled = true;
     }
   });
+});
+
+jdStart?.addEventListener('click', () => {
+  if (ws?.readyState !== 1) return;
+  const jobDescription = (jdInput?.value || '').trim();
+  ws.send(JSON.stringify({ type: 'mode', mode: 'interview', jobDescription }));
+  setStatus('Setting up your interview…');
+  talkBtn.disabled = true;
+  if (jdPanel) jdPanel.hidden = true; // collapse once the drill is starting
 });
 
 // ---- audio playback (24 kHz PCM) ---------------------------------------------

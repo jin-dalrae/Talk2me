@@ -287,6 +287,36 @@ button {
   display: none;
 }
 
+/* Signed in, Sign out is the only visible action — span the full row so it stays
+   centered instead of sitting alone in the left grid column. */
+#signout {
+  grid-column: 1 / -1;
+}
+
+.jd-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.jd-panel textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--outline);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.jd-panel textarea::placeholder {
+  color: var(--faint);
+}
+
 .app-header {
   flex: none;
   padding: 14px 18px 10px;
