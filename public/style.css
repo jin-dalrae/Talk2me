@@ -63,6 +63,13 @@ button {
   flex-direction: column;
 }
 
+/* The flex rule above outranks the UA [hidden] rule, so the toggled-off
+   screen would otherwise stay visible. Restore hidden for both screens. */
+.welcome[hidden],
+.call[hidden] {
+  display: none;
+}
+
 .welcome {
   justify-content: space-between;
   align-items: center;

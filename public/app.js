@@ -21,12 +21,19 @@ async function connect() {
 }
 
 window.addEventListener('talk2me:auth-changed', () => {
-  wsReady = false;
-  if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) {
-    ws.close();
-  } else {
+  // Auth is sent as an in-band message over the socket, so an auth change never
+  // requires a new connection — just push the current token over the live one.
+  // The old code closed the socket on every auth event, including Firebase's
+  // initial onAuthStateChanged that fires once on load, which flashed
+  // "Disconnected. Reconnecting…" and spun up a throwaway second Live session
+  // on every page load.
+  if (ws?.readyState === WebSocket.OPEN) {
+    sendAuthIfAvailable();
+  } else if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
+    wsReady = false;
     connect();
   }
+  // CONNECTING: leave it — its onopen handler already calls sendAuthIfAvailable().
 });
 
 function handleServer(m) {
