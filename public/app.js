@@ -45,7 +45,7 @@ function handleServer(m) {
         setStatus('Ready when you are');
       } else {
         talkBtn.disabled = false;
-        setStatus('Ready — hold to talk');
+        setStatus('Ready — tap to talk');
       }
       break;
     case 'speaker':
@@ -72,9 +72,10 @@ function handleServer(m) {
       break;
     case 'turn_end':
       talkBtn.disabled = false;
-      setStatus('Ready — hold to talk');
+      setStatus('Ready — tap to talk');
       break;
     case 'error':
+      talkBtn.disabled = false; // don't strand the user mid-turn on an error
       setStatus(m.message);
       break;
     case 'auth_ok':
@@ -126,7 +127,7 @@ startBtn.addEventListener('click', async () => {
   if (micCtx?.state === 'suspended') await micCtx.resume();
 
   talkBtn.disabled = !wsReady;
-  setStatus(wsReady ? 'Ready — hold to talk' : 'Starting…');
+  setStatus(wsReady ? 'Ready — tap to talk' : 'Starting…');
 
   if (!started && ws?.readyState === 1) {
     ws.send(JSON.stringify({ type: 'begin' }));
@@ -147,7 +148,7 @@ backBtn.addEventListener('click', () => {
 function setStatus(text, cls = '') {
   statusEl.textContent = text;
   statusEl.className = `status ${cls}`;
-  if (text === 'Ready — hold to talk' || text === 'Ready when you are') {
+  if (text === 'Ready — tap to talk' || text === 'Ready when you are') {
     resetTalkButtonLabel();
   }
 }
@@ -286,7 +287,10 @@ async function ensureMic() {
   return true;
 }
 
-// ---- push to talk ------------------------------------------------------------
+// ---- tap to talk (toggle) ----------------------------------------------------
+// Tap once to open the mic, tap again to send. This used to be press-and-hold,
+// which was fiddly on touch and turned a quick tap into an empty turn (mousedown
+// started and mouseup stopped almost instantly).
 async function startTalking() {
   if (talkBtn.disabled || recording) return;
   ensurePlayCtx();
@@ -296,13 +300,14 @@ async function startTalking() {
 
   recording = true;
   talkBtn.classList.add('recording');
-  talkBtn.querySelector('.talk-label').textContent = 'Listening...';
-  talkBtn.querySelector('.talk-hint').textContent = "release when you're done";
+  talkBtn.querySelector('.talk-label').textContent = 'Listening… tap to send';
+  talkBtn.querySelector('.talk-hint').textContent = 'mic is open';
   setStatus('Listening…', 'listening');
 
-  // user's bubble first, so it sits above the reply
+  // user's bubble first, so it sits above the reply. Show a listening indicator
+  // (animated dots), not a literal "…" that reads like the user actually said it.
   userBubble = addBubble('user', 'You');
-  setBubbleText(userBubble, '…');
+  userBubble.querySelector('.body').innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
 
   ws.send(JSON.stringify({ type: 'mic_start' }));
   workletNode.port.postMessage({ cmd: 'start' });
@@ -312,6 +317,7 @@ function stopTalking() {
   if (!recording) return;
   recording = false;
   talkBtn.classList.remove('recording');
+  talkBtn.disabled = true; // wait for the reply before opening the mic again
   talkBtn.querySelector('.talk-label').textContent = 'Thinking...';
   talkBtn.querySelector('.talk-hint').textContent = 'waiting for a reply';
   setStatus('Thinking…');
@@ -319,27 +325,23 @@ function stopTalking() {
   workletNode?.port.postMessage({ cmd: 'stop' });
 }
 
-talkBtn.addEventListener('mousedown', startTalking);
-talkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startTalking(); }, { passive: false });
-window.addEventListener('mouseup', stopTalking);
-talkBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopTalking(); }, { passive: false });
+function toggleTalking() {
+  if (recording) stopTalking();
+  else startTalking();
+}
+
+talkBtn.addEventListener('click', toggleTalking);
 
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && !e.repeat && document.activeElement.tagName !== 'INPUT') {
     e.preventDefault();
-    startTalking();
-  }
-});
-window.addEventListener('keyup', (e) => {
-  if (e.code === 'Space') {
-    e.preventDefault();
-    stopTalking();
+    toggleTalking();
   }
 });
 
 function resetTalkButtonLabel() {
-  talkBtn.querySelector('.talk-label').textContent = 'Hold to talk';
-  talkBtn.querySelector('.talk-hint').textContent = 'or hold the spacebar';
+  talkBtn.querySelector('.talk-label').textContent = 'Tap to talk';
+  talkBtn.querySelector('.talk-hint').textContent = 'or press the spacebar';
 }
 
 // ---- base64 <-> bytes --------------------------------------------------------

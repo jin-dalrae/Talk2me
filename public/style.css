@@ -397,6 +397,8 @@ main {
 }
 
 .bubble-inner {
+  display: inline-block; /* keep the bubble one box when text wraps to 2+ rows */
+  max-width: 100%;
   padding: 10px 14px;
   border-radius: 16px;
   color: var(--text);
@@ -404,6 +406,28 @@ main {
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* "Listening" indicator for the user bubble — animated dots, not literal text. */
+.typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 0;
+}
+.typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.3;
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing i:nth-child(2) { animation-delay: 0.15s; }
+.typing i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing-bounce {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 0.9; }
 }
 
 .bubble .who-row {
