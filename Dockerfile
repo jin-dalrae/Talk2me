@@ -7,6 +7,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY . .
+# bust build cache when static assets change
+ARG ASSETS_REV=6
 
 EXPOSE 3000
 CMD ["npm", "start"]

@@ -823,7 +823,7 @@ app.get('/healthz', (_req, res) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.status(200).json({ ok: true });
+  res.status(200).json({ ok: true, build: 'lbd-2026-06-19' });
 });
 
 // LbD speaking-trends dashboard (persisted debriefs in Firestore).
