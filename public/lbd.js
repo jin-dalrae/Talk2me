@@ -1,60 +1,94 @@
 import { getCurrentIdToken, initAuthUi } from './firebase-client.js';
+import { creditsLabel, fetchLbdCredits } from './lbd-credits.js';
+import {
+  CONFLICT_STYLES,
+  FEEDBACK_MODELS,
+  renderDebriefHtml,
+} from './lbd-frameworks.js';
 
-// Conflict & Feedback Simulator — a spoken leadership "flight simulator". You
-// talk (no multiple choice); Luc & Jeenie role-play the counterpart(s) and push
-// back in real voice; after a few rounds you get a debrief that classifies your
-// conflict style and shows how other styles would have handled the same moments.
+// Lateral leadership flight simulator — speak naturally; close when you agree, land a decision, or say goodbye.
 
-const MAX_EXCHANGES = 4; // auto-debrief after roughly this many of your turns
+const SOFT_HINT_EXCHANGES = 8;
 
 const SCENARIOS = [
   {
     id: 'deadline',
-    title: 'The Deadline Squeeze',
-    blurb: 'A PM wants to cut research and QA to hit a moved-up demo. Hold the line — or trade.',
+    title: 'Logical Sparring',
+    featured: true,
+    blurb: 'Maya pushes to cut research for an exec demo. Speak naturally — your debrief diagnoses how you argued.',
+    stakes: 'Ship quality vs. a fixed exec demo; eng is ready to start Monday.',
+    authorityGap: 'You influence the design process but do not control the roadmap or eng capacity.',
+    primaryStyles: ['Negotiator', 'Fighter'],
+    feedbackFit: null,
+    coachingNote: 'Collaborating (Negotiator) works when you trade across issues — timeline, scope, risk — not when you only say "research matters."',
     situation:
       'A design leader is trying to protect the research and design-QA process. The product manager wants to cut it to hit an exec demo that just moved up two weeks. The deadline is fixed; the design leader has no authority over the PM.',
-    a: { name: 'Maya', role: 'the Product Manager', stance: 'You moved the exec demo up two weeks and you want to cut the user-research round and the design-QA pass to make it. You think research rarely changes the answer. You will defend the date hard.', opening: "The exec demo got moved up two weeks — let's just skip the research round and build it. We already know what users want, right?" },
-    b: { name: 'Sam', role: 'the Eng Lead', stance: 'You back Maya: research rarely changes much and you want your team to start coding Monday. You push for speed.' },
+    a: { name: 'Maya', voice: 'Jeenie', role: 'the Product Manager', stance: 'You moved the exec demo up two weeks and want to cut the user-research round and design-QA pass. You think research rarely changes the answer and will defend the date hard — unless the designer offers a faster, smaller study or a post-demo QA window you can sell upstream.', opening: "The exec demo got moved up two weeks — let's just skip the research round and build it. We already know what users want, right?" },
+    b: { name: 'Sam', voice: 'Luc', role: 'the Eng Lead', stance: 'You back Maya: research rarely changes much and you want your team to start coding Monday. You push for speed but will accept a clear phased plan.' },
   },
   {
     id: 'critique',
     title: 'Critique Crossfire',
     blurb: 'A peer publicly trashes your design direction in a crit. The room is watching.',
+    stakes: 'Your credibility with the design team and the direction for the quarter.',
+    authorityGap: 'Peers do not report to you; the room expects you to lead without pulling rank.',
+    primaryStyles: ['Radical Candor', 'Negotiator'],
+    feedbackFit: 'SBI or Radical Candor — respond to public criticism with specificity, not defensiveness.',
+    coachingNote: 'Competing (Fighter) in a public crit often escalates; use care + direct challenge, then pivot to criteria.',
     situation:
       "In a team design critique, a peer designer publicly says the design leader's direction is wrong and dated. The design leader has no authority over the peer and has to handle the challenge in front of the team.",
-    a: { name: 'Devon', role: 'a peer designer', stance: "You think the design leader's direction is wrong and feels dated, and you said so openly in the crit. You hold your critique and want a real answer, not a brush-off.", opening: "Honestly, I think this whole direction is wrong. It feels dated and I don't get why we're going this way." },
-    b: { name: 'Priya', role: 'another designer', stance: 'You pile on — you are also unconvinced by the direction and back Devon.' },
+    a: { name: 'Devon', voice: 'Luc', role: 'a peer designer', stance: "You think the direction is wrong and dated, and you said so openly. You want a real answer on user evidence and criteria — not a brush-off. You will soften if the leader engages your concern with specifics.", opening: "Honestly, I think this whole direction is wrong. It feels dated and I don't get why we're going this way." },
+    b: { name: 'Priya', voice: 'Jeenie', role: 'another designer', stance: 'You pile on — you are also unconvinced and back Devon, but you will quiet down if the leader names decision criteria.' },
   },
   {
     id: 'accessibility',
     title: 'The Scope Cut',
     blurb: 'Engineering wants to drop all accessibility to hit the date. Where is your line?',
+    stakes: 'Legal/ethical floor vs. release date; PM metrics do not include accessibility.',
+    authorityGap: 'Eng owns implementation; you set standards but cannot force the backlog.',
+    primaryStyles: ['Fighter', 'Negotiator'],
+    feedbackFit: null,
+    coachingNote: 'Hold a non-negotiable floor (compliance, core flows) then negotiate phasing — "later" without a date is not a plan.',
     situation:
       'Engineering wants to drop all accessibility work this release to hit the date and "do it later". The design leader believes accessibility is a non-negotiable floor and a legal risk, but has no authority over engineering.',
-    a: { name: 'Raj', role: 'the Eng Lead', stance: "To hit the date you're cutting all accessibility this release — screen reader support, focus states, everything — and doing it 'later'. You think it's not worth the time right now.", opening: "To hit the date, we're cutting the accessibility work this release — screen reader support, focus states, all of it. We'll do it later." },
-    b: { name: 'Lena', role: 'the Product Manager', stance: "You agree with Raj — accessibility isn't in this quarter's success metrics, so it can wait." },
+    a: { name: 'Raj', voice: 'Luc', role: 'the Eng Lead', stance: "To hit the date you're cutting all accessibility this release — screen reader support, focus states, everything — for 'later'. You think it's too much work unless the designer gives a minimal shippable slice with dates.", opening: "To hit the date, we're cutting the accessibility work this release — screen reader support, focus states, all of it. We'll do it later." },
+    b: { name: 'Lena', voice: 'Jeenie', role: 'the Product Manager', stance: "You agree with Raj — accessibility isn't in this quarter's success metrics — but you will support a phased plan with explicit milestones if risk is named clearly." },
+  },
+  {
+    id: 'intake',
+    title: 'The Intake Bypass',
+    blurb: 'A VP stakeholder routed work straight to eng and skipped your team\'s process.',
+    stakes: 'Team capacity, design quality on a high-visibility exec ask, precedent for bypass.',
+    authorityGap: 'The VP has organizational power; you cannot say "no" — only renegotiate how work enters.',
+    primaryStyles: ['Negotiator', 'Diplomat'],
+    feedbackFit: 'AID works well with senior stakeholders — action, impact, desired routing.',
+    coachingNote: 'De-escalate with a senior (Diplomat) then re-anchor process (Negotiator) — competing with a VP rarely ends well.',
+    situation:
+      "A VP emailed engineering directly to jump-start a CEO's pet feature, skipping the design team's intake and research. Eng has already started. The design leader must reassert process without humiliating the VP or blocking the CEO's visibility.",
+    a: { name: 'Jordan', voice: 'Jeenie', role: 'a VP of Product', stance: "You routed this directly to eng because the CEO wants movement and intake felt slow. Push urgency early, but if the user proposes intake-lite (≤3 days), a paired sprint with named designers, or a same-day VP huddle, negotiate or accept — you are not trying to humiliate design. Never pretend the design VP was fully looped if they were not.", opening: "I sent this straight to eng — the CEO wants to see progress next week and we cannot wait on intake." },
+    b: { name: 'Chris', voice: 'Luc', role: 'the Eng Lead', stance: "You kicked off scaffolding on the VP's direction. You want clarity to avoid rework. If the user offers a concrete fast discovery plan (people, days, deliverable), engage it — do not repeat that they are 'contractors.' If they ask for VP alignment, support a short joint call instead of blocking." },
   },
 ];
-
-const FRAMEWORKS = {
-  Fighter: 'competes / forces',
-  Negotiator: 'collaborates to a win-win',
-  Diplomat: 'accommodates strategically',
-  Avoider: 'withdraws / defers',
-  'People Pleaser': 'caves to keep the peace',
-  SBI: 'Situation-Behavior-Impact',
-  AID: 'Action-Impact-Desired',
-  'Radical Candor': 'care personally + challenge directly',
-};
 
 // ---- state -------------------------------------------------------------------
 let parties = 1;
 let scenario = null;
 let userExchanges = 0;
 let started = false;
-let awaitingDebrief = false;
+let closing = false;
+let debriefRequested = false;
+let naturalWrap = false;
+let sessionStartedAt = 0;
+let creditsState = null;
+let recTimer = null;
+let wrapBtn = null;
+let progressEl = null;
+let progressTimer = null;
+let pendingLbd = null;
 let signedIn = false;
+let voiceReadyWaiters = [];
+let logicRailEl = null;
+let logicTurn = 0;
 
 const $ = (id) => document.getElementById(id);
 const pickerEl = $('picker');
@@ -66,71 +100,166 @@ const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
 let ws = null;
 let wsConnected = false;
 
+function notifyVoiceReady() {
+  const waiters = voiceReadyWaiters.splice(0);
+  waiters.forEach((fn) => fn());
+}
+
 function connectVoice() {
   let url;
   try { url = new URL(window.TALK2ME_WS_URL || `${wsProto}://${location.host}/ws`); } catch { return; }
   ws = new WebSocket(url);
   ws.onopen = () => sendAuth();
-  ws.onclose = () => { wsConnected = false; setTimeout(connectVoice, 2500); };
+  ws.onclose = () => {
+    wsConnected = false;
+    if (!started) setTimeout(connectVoice, 2500);
+  };
   ws.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch { return; } handleServer(m); };
 }
-async function sendAuth() {
+
+async function sendAuth(forceRefresh = false) {
   if (ws?.readyState !== WebSocket.OPEN) return;
-  const token = await getCurrentIdToken();
+  const token = await getCurrentIdToken(forceRefresh);
   if (token) ws.send(JSON.stringify({ type: 'auth', token }));
+}
+
+function waitForVoiceReady(ms = 15000) {
+  if (wsConnected && ws?.readyState === WebSocket.OPEN) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Voice connection timed out')), ms);
+    voiceReadyWaiters.push(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+async function ensureFreshVoice() {
+  if (ws) {
+    ws.onclose = null;
+    try { ws.close(); } catch {}
+    ws = null;
+    wsConnected = false;
+  }
+  connectVoice();
+  await waitForVoiceReady();
+  await sendAuth(true);
 }
 
 let respBubble = null;
 let userBubble = null;
 let currentSpeaker = null;
+let currentSpeakerMeta = {};
 
 function handleServer(m) {
   switch (m.type) {
-    case 'auth_ok': wsConnected = true; break;
-    case 'ready': wsConnected = true; break;
+    case 'auth_ok':
+      wsConnected = true;
+      notifyVoiceReady();
+      break;
+    case 'ready':
+      wsConnected = true;
+      notifyVoiceReady();
+      if (pendingLbd) {
+        ws.send(JSON.stringify({ type: 'mode', mode: 'lbd', lbd: pendingLbd, newSession: true }));
+        pendingLbd = null;
+      }
+      break;
     case 'speaker':
-      // The relay also emits 'speaker' on mic_start (while YOU are still talking),
-      // so don't touch the talk button or claim they're responding here — that's
-      // what was killing "tap to send". Just note who will reply.
+      suppressAudio = false;
+      ensurePlayCtx();
       currentSpeaker = m.name;
+      currentSpeakerMeta = { displayName: m.displayName, role: m.role };
       respBubble = null;
+      setStopEnabled(true);
+      if (m.role === 'debrief') setStatus('Alex is reading your debrief aloud…');
       break;
     case 'user_transcript':
       if (userBubble) setBubbleBody(userBubble, m.text);
       break;
     case 'transcript':
       if (!respBubble) {
-        respBubble = addMsg({ cls: m.name === 'Jeenie' ? 'them them-b' : 'them them-a', who: counterpartName(m.name) });
-        setStatus(`${counterpartName(m.name)} is responding…`);
-        if (talkBtn) talkBtn.disabled = true; // their turn now — lock the mic until turn_end
+        const cls = msgClass(m);
+        respBubble = addMsg({ cls, who: speakerLabel(m) });
+        setStatus(`${speakerLabel(m)} is responding…`);
+        if (talkBtn) talkBtn.disabled = true;
       }
       setBubbleBody(respBubble, m.text);
       break;
-    case 'audio': playPcm(bytesFromBase64(m.data)); break;
+    case 'audio':
+      if (!suppressAudio) playPcm(bytesFromBase64(m.data));
+      setStopEnabled(true);
+      break;
+    case 'interrupted':
+      stopSpeaking({ notifyServer: false });
+      break;
+    case 'lbd_wrapping':
+      naturalWrap = m.reason === 'natural';
+      enterClosing(naturalWrap
+        ? 'You closed the conversation — getting your debrief…'
+        : 'Wrapping up — landing the conclusion…');
+      break;
     case 'turn_end':
+      suppressAudio = false;
       respBubble = null;
-      if (awaitingDebrief || userExchanges >= MAX_EXCHANGES) {
+      setStopEnabled(false);
+      if (closing && m.role === 'debrief') {
+        setStatus('Loading your written debrief…');
+      } else if (closing && !debriefRequested && !naturalWrap) {
+        debriefRequested = true;
         triggerDebrief();
-      } else {
-        setStatus('Your turn — tap to respond');
+      } else if (!closing) {
+        updateProgress();
+        if (logicRailEl && m.role !== 'debrief') {
+          const hint = logicRailEl.querySelector('.lbd-logic-wait');
+          if (hint) hint.textContent = 'Analyzing logic patterns…';
+        }
+        setStatus(turnStatusHint());
         if (talkBtn) talkBtn.disabled = false;
+        if (wrapBtn) wrapBtn.disabled = false;
       }
       break;
+    case 'lbd_logic':
+      renderLogicRail(m.data, m.turn);
+      break;
     case 'lbd_debrief': renderDebrief(m.data); break;
+    case 'lbd_credits':
+      creditsState = m.credits;
+      renderCreditsHeader();
+      break;
+    case 'lbd_denied':
+      creditsState = m.credits || creditsState;
+      renderCreditsHeader();
+      resetSession();
+      renderPicker();
+      break;
     case 'need_auth':
     case 'auth_error':
-      if (started) setStatus('Sign in (top right) to spar with live voices.');
+      if (started) setStatus(signedIn ? 'Reconnecting...' : 'Sign in (top right) to spar with live voices.');
       break;
   }
 }
 
-function counterpartName(voice) {
-  const cp = voice === 'Jeenie' ? scenario?.b : scenario?.a;
-  return cp ? `${cp.name} · ${cp.role}` : voice;
+function speakerLabel(m) {
+  if (m.role === 'debrief') return 'Alex · leadership coach';
+  if (m.displayName) {
+    const role = scenario?.a?.name === m.displayName ? scenario.a.role : scenario?.b?.role;
+    return role ? `${m.displayName} · ${role}` : m.displayName;
+  }
+  const cp = scenario?.a?.voice === m.name ? scenario.a : (scenario?.b?.voice === m.name ? scenario.b : scenario?.a);
+  return cp ? `${cp.name} · ${cp.role}` : m.name;
+}
+
+function msgClass(m) {
+  if (m.role === 'debrief' || m.role === 'coach') return 'them them-coach';
+  if (scenario?.a?.voice === m.name) return 'them them-a';
+  return 'them them-b';
 }
 
 // ---- 24kHz playback ----------------------------------------------------------
 let playCtx = null, playHead = 0, liveSources = [];
+let suppressAudio = false;
+let stopBtn = null;
 function ensurePlayCtx() {
   if (!playCtx) playCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
   if (playCtx.state === 'suspended') playCtx.resume();
@@ -156,6 +285,38 @@ function stopPlayback() {
   for (const s of liveSources) { try { s.stop(); } catch {} }
   liveSources = [];
   if (playCtx) playHead = playCtx.currentTime;
+}
+function setStopEnabled(on) {
+  if (!stopBtn) return;
+  stopBtn.disabled = !on || closing;
+}
+function stopSpeaking({ notifyServer = true } = {}) {
+  suppressAudio = true;
+  stopPlayback();
+  setStopEnabled(false);
+  if (notifyServer && ws?.readyState === 1) ws.send(JSON.stringify({ type: 'stop_speaking' }));
+  if (!closing && started) {
+    respBubble = null;
+    if (talkBtn) talkBtn.disabled = false;
+    if (wrapBtn) wrapBtn.disabled = false;
+    setStatus(turnStatusHint());
+  }
+}
+
+function turnStatusHint() {
+  const extra = userExchanges >= SOFT_HINT_EXCHANGES
+    ? ' — agree, land a decision, or say goodbye when you are done'
+    : '';
+  return `Your turn — tap to respond${extra}`;
+}
+
+function enterClosing(statusText) {
+  if (closing) return;
+  closing = true;
+  if (recording) stopTalking();
+  if (talkBtn) talkBtn.disabled = true;
+  if (wrapBtn) wrapBtn.disabled = true;
+  setStatus(statusText);
 }
 function bytesFromBase64(b64) {
   const bin = atob(b64);
@@ -208,6 +369,9 @@ async function startTalking() {
   if (!(await ensureMic())) return;
   if (micCtx?.state === 'suspended') await micCtx.resume();
   recording = true;
+  if (wrapBtn) wrapBtn.disabled = true;
+  clearTimeout(recTimer);
+  recTimer = setTimeout(() => { if (recording) { setStatus('3-min limit reached - sending.'); stopTalking(); } }, 3 * 60 * 1000);
   talkBtn.classList.add('recording');
   setTalkLabel('Listening… tap to send');
   setStatus('Listening…');
@@ -217,97 +381,263 @@ async function startTalking() {
 }
 function stopTalking() {
   if (!recording) return;
+  clearTimeout(recTimer);
   recording = false;
   talkBtn.classList.remove('recording');
   talkBtn.disabled = true;
+  if (wrapBtn) wrapBtn.disabled = true;
   setTalkLabel('Tap to talk');
   userExchanges += 1;
-  if (userExchanges >= MAX_EXCHANGES) awaitingDebrief = true;
   setStatus('…');
   workletNode?.port.postMessage({ cmd: 'stop' });
+}
+
+function frameworkGuideHtml() {
+  const conflict = Object.entries(CONFLICT_STYLES)
+    .map(([k, v]) => `<p><span class="lbd-tag lbd-${k.replace(/\W/g, '')}">${k}</span> <em>${v.tki}</em> — ${v.whenItWorks}</p>`)
+    .join('');
+  const feedback = Object.entries(FEEDBACK_MODELS)
+    .map(([k, v]) => `<p><span class="lbd-tag lbd-${k.replace(/\W/g, '')}">${k}</span> — ${v.structure}</p>`)
+    .join('');
+  return `${conflict}${feedback}`;
 }
 
 // ---- picker ------------------------------------------------------------------
 function renderPicker() {
   stopPlayback();
   started = false;
+  $('lbd-wrap')?.classList.remove('lbd-sim-wide');
   show(pickerEl);
   const cards = SCENARIOS.map(
-    (s) => `<button class="lbd-card" data-id="${s.id}" type="button"><strong>${s.title}</strong><span>${s.blurb}</span></button>`,
+    (s) => `<button class="lbd-card${s.featured ? ' lbd-card-featured' : ''}" data-id="${s.id}" type="button"><strong>${s.title}</strong><span>${s.blurb}</span></button>`,
   ).join('');
   pickerEl.innerHTML = `
-    <h1 class="lbd-h1">Conflict &amp; Feedback Simulator</h1>
-    <p class="lbd-sub">Rehearse lateral leadership out loud — you speak, Luc &amp; Jeenie push back in real voice, and after a few rounds you get a debrief on your conflict style. <strong>Sign-in required</strong> (the counterparts use live voice).</p>
-    <div class="lbd-seg" role="radiogroup" aria-label="Number of counterparts">
-      <button class="lbd-seg-btn is-on" data-parties="1" type="button">1 : 1 — one counterpart</button>
-      <button class="lbd-seg-btn" data-parties="2" type="button">1 : 2 — outnumbered</button>
-    </div>
-    <div class="lbd-cards">${cards}</div>
-    <p class="lbd-hint" id="lbd-hint"></p>
-    <p class="lbd-foot">You'll be scored against: Fighter · Negotiator · Diplomat · Avoider · People&nbsp;Pleaser · SBI · AID · Radical&nbsp;Candor</p>`;
+    <div class="lbd-picker-inner lbd-pane-inner">
+      <header class="lbd-picker-head">
+        <h1 class="lbd-h1">Lateral Leadership Flight Simulator</h1>
+        <div class="lbd-seg" id="lbd-parties" role="radiogroup" aria-label="Number of counterparts">
+          <button class="lbd-seg-btn is-on" data-parties="1" type="button">1 : 1 — one counterpart</button>
+          <button class="lbd-seg-btn" data-parties="2" type="button">1 : 2 — outnumbered</button>
+        </div>
+        <p class="lbd-hint" id="lbd-hint"></p>
+      </header>
+      <div class="lbd-cards">${cards}</div>
+      <footer class="lbd-picker-foot">
+        <details class="lbd-guide">
+          <summary>Framework guide (Thomas-Kilmann + feedback models)</summary>
+          <div class="lbd-guide-body">${frameworkGuideHtml()}</div>
+        </details>
+        <p class="lbd-foot"><a class="lbd-link" href="/lbd/trends">Speaking trends</a></p>
+      </footer>
+    </div>`;
+  pickerEl.scrollTop = 0;
   pickerEl.querySelectorAll('.lbd-seg-btn').forEach((b) =>
     b.addEventListener('click', () => {
       parties = Number(b.dataset.parties);
       pickerEl.querySelectorAll('.lbd-seg-btn').forEach((x) => x.classList.toggle('is-on', x === b));
     }),
   );
-  pickerEl.querySelectorAll('.lbd-card').forEach((b) => b.addEventListener('click', () => start(b.dataset.id)));
+  pickerEl.querySelectorAll('.lbd-card').forEach((b) =>
+    b.addEventListener('click', () => start(b.dataset.id)),
+  );
   setHint();
 }
 
 function setHint() {
   const h = $('lbd-hint');
   if (!h) return;
-  h.classList.toggle('ok', signedIn);
-  h.textContent = signedIn
-    ? '✓ Signed in — pick a scenario to begin.'
-    : '🔒 You must sign in to use the simulator — tap “Sign in”, top right. The counterparts reply in live voice.';
+  if (!signedIn) {
+    h.classList.remove('ok');
+    h.textContent = '🔒 Sign in (top right) — 5 free live simulations per day.';
+    return;
+  }
+  const left = creditsState?.remaining ?? '…';
+  h.classList.toggle('ok', (creditsState?.remaining ?? 0) > 0);
+  if (creditsState && creditsState.remaining <= 0) {
+    h.textContent = 'No free simulations left today — credits renew at midnight UTC.';
+  } else {
+    h.textContent = `✓ Signed in — ${left} of ${creditsState?.limit ?? 5} free simulations left today.`;
+  }
+}
+
+async function refreshCredits() {
+  const el = $('lbd-credits');
+  if (!signedIn) {
+    creditsState = null;
+    if (el) el.hidden = true;
+    setHint();
+    return;
+  }
+  creditsState = await fetchLbdCredits(getCurrentIdToken);
+  renderCreditsHeader();
+  setHint();
+}
+
+function renderCreditsHeader() {
+  const el = $('lbd-credits');
+  if (!el) return;
+  if (!signedIn || !creditsState) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.textContent = creditsLabel(creditsState);
+  el.classList.toggle('is-empty', creditsState.remaining <= 0);
+  el.title = `Resets ${new Date(creditsState.resetsAt).toLocaleString()}`;
 }
 
 // ---- simulator ---------------------------------------------------------------
 function lbdPayload() {
-  return { parties, situation: scenario.situation, a: scenario.a, b: parties === 2 ? scenario.b : null };
+  return {
+    scenarioId: scenario.id,
+    scenarioTitle: scenario.title,
+    stakes: scenario.stakes,
+    authorityGap: scenario.authorityGap,
+    primaryStyles: scenario.primaryStyles,
+    feedbackFit: scenario.feedbackFit,
+    coachingNote: scenario.coachingNote,
+    parties,
+    situation: scenario.situation,
+    a: scenario.a,
+    b: parties === 2 ? scenario.b : null,
+  };
 }
 let chatEl = null, composerEl = null;
 
 async function start(id) {
-  if (!signedIn) { setHint(); return; }
+  if (!signedIn) {
+    show(pickerEl);
+    setHint();
+    return;
+  }
+  if (creditsState && creditsState.remaining <= 0) {
+    show(pickerEl);
+    setHint();
+    return;
+  }
   scenario = SCENARIOS.find((s) => s.id === id);
+  if (!scenario) return;
   userExchanges = 0;
-  awaitingDebrief = false;
+  closing = false;
+  debriefRequested = false;
   started = true;
+  sessionStartedAt = Date.now();
   ensurePlayCtx();
   if (!(await ensureMic())) { started = false; return; }
   buildSimShell();
-  setStatus('Setting the scene…');
-  await sendAuth();
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'mode', mode: 'lbd', lbd: lbdPayload() }));
+  setStatus('Connecting fresh voice session…');
+  try {
+    pendingLbd = lbdPayload();
+    await ensureFreshVoice();
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'mode', mode: 'lbd', lbd: pendingLbd, newSession: true }));
+      pendingLbd = null;
+    }
+    setStatus('Setting the scene…');
+    clearInterval(progressTimer);
+    progressTimer = setInterval(updateProgress, 1000);
+    updateProgress();
+  } catch {
+    started = false;
+    setStatus('Could not connect — try again in a moment.');
+  }
+}
+
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function resetLogicRail() {
+  logicTurn = 0;
+  if (!logicRailEl) return;
+  logicRailEl.innerHTML = `
+    <p class="lbd-h3">Logic lens</p>
+    <p class="lbd-dim">After each exchange, see logic vs non-logic patterns — yours and theirs — plus one rational alternative.</p>
+    <p class="lbd-logic-wait">Waiting for the first line…</p>`;
+}
+
+function renderLogicRail(data, turn) {
+  if (!logicRailEl || !data) return;
+  logicTurn = turn || logicTurn + 1;
+  const cards = (data.readings || [])
+    .map((r) => {
+      const kind = r.kind || 'mixed';
+      return `<article class="lbd-logic-card kind-${kind}">
+        <div class="lbd-logic-card-top">
+          <strong>${esc(r.displayName || r.speaker)}</strong>
+          <span class="lbd-logic-kind">${esc(kind)}</span>
+        </div>
+        <p class="lbd-logic-pattern">${esc(r.pattern)}</p>
+        <p class="lbd-logic-detail">${esc(r.detail)}</p>
+      </article>`;
+    })
+    .join('');
+  const alt = data.alternative;
+  const altHtml = alt?.move
+    ? `<section class="lbd-logic-alt">
+        <p class="lbd-h3">Alternative move</p>
+        <p class="lbd-dim">For ${esc(alt.for)}${alt.replaces ? ` · instead of <em>${esc(alt.replaces)}</em>` : ''}</p>
+        <p class="lbd-logic-move">"${esc(alt.move)}"</p>
+        ${alt.why ? `<p class="lbd-logic-why">${esc(alt.why)}</p>` : ''}
+      </section>`
+    : '';
+  logicRailEl.innerHTML = `
+    <p class="lbd-h3">Logic lens · turn ${logicTurn}</p>
+    <div class="lbd-logic-cards">${cards}</div>
+    ${altHtml}`;
 }
 
 function buildSimShell() {
   show(simEl);
+  $('lbd-wrap')?.classList.add('lbd-sim-wide');
   simEl.innerHTML = `
     <div class="lbd-top">
       <button class="lbd-back" id="lbd-quit" type="button">← Scenarios</button>
-      <div class="lbd-progress">${scenario.title} · ${parties === 2 ? '1:2' : '1:1'}</div>
+      <div class="lbd-progress" id="lbd-progress">${scenario.title} · ${parties === 2 ? '1:2' : '1:1'}</div>
       <span></span>
     </div>
-    <div class="lbd-chat" id="lbd-chat"></div>
-    <div class="lbd-composer" id="lbd-composer">
-      <div class="lbd-status" id="lbd-status">Setting the scene…</div>
-      <button class="lbd-talk" id="lbd-talk" type="button" disabled>
-        <span class="lbd-mic" aria-hidden="true"></span><span id="lbd-talk-label">Tap to talk</span>
-      </button>
+    <div class="lbd-sim-body">
+      <div class="lbd-sim-main">
+        <div class="lbd-chat" id="lbd-chat"></div>
+        <div class="lbd-composer" id="lbd-composer">
+          <div class="lbd-status" id="lbd-status">Setting the scene…</div>
+          <div class="lbd-talk-row">
+            <button class="lbd-talk" id="lbd-talk" type="button" disabled>
+              <span class="lbd-mic" aria-hidden="true"></span><span id="lbd-talk-label">Tap to talk</span>
+            </button>
+            <button class="lbd-stop" id="lbd-stop" type="button" disabled title="Stop audio (Esc)">Stop</button>
+          </div>
+          <button class="lbd-wrapup" id="lbd-wrapup" type="button" disabled title="End early if you are done">End session &amp; debrief</button>
+        </div>
+      </div>
+      <aside class="lbd-logic-rail" id="lbd-logic-rail" aria-live="polite"></aside>
     </div>`;
   chatEl = $('lbd-chat');
   composerEl = $('lbd-composer');
+  logicRailEl = $('lbd-logic-rail');
+  resetLogicRail();
   talkBtn = $('lbd-talk');
+  stopBtn = $('lbd-stop');
+  wrapBtn = $('lbd-wrapup');
+  progressEl = $('lbd-progress');
   $('lbd-quit').addEventListener('click', () => { resetSession(); renderPicker(); });
   talkBtn.addEventListener('click', toggleTalk);
+  stopBtn.addEventListener('click', () => stopSpeaking());
+  wrapBtn.addEventListener('click', wrapUp);
   window.addEventListener('keydown', spaceHandler);
 }
 function spaceHandler(e) {
-  if (e.code === 'Space' && !e.repeat && started && document.activeElement?.tagName !== 'INPUT') {
+  if (document.activeElement?.tagName === 'INPUT') return;
+  if (e.code === 'Escape' && !e.repeat && started && stopBtn && !stopBtn.disabled) {
+    e.preventDefault();
+    stopSpeaking();
+    return;
+  }
+  if (e.code === 'Space' && !e.repeat && started) {
     e.preventDefault();
     toggleTalk();
   }
@@ -333,74 +663,110 @@ function addMsg({ cls = '', who = '', text = '', html = '' }) {
   if (html) b.innerHTML = html; else b.textContent = text;
   el.appendChild(b);
   chatEl.appendChild(el);
-  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  chatEl.scrollTop = chatEl.scrollHeight;
   return el;
 }
 function setBubbleBody(el, text) {
   if (!el) return;
   el.querySelector('.lbd-bubble').textContent = text;
-  el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  chatEl.scrollTop = chatEl.scrollHeight;
 }
 function setStatus(t) { const s = $('lbd-status'); if (s) s.textContent = t; }
 function setTalkLabel(t) { const l = $('lbd-talk-label'); if (l) l.textContent = t; }
 
+function wrapUp() {
+  if (closing || !started) return;
+  enterClosing('Wrapping up — landing the conclusion…');
+  if (ws?.readyState === 1) ws.send(JSON.stringify({ type: 'lbd_close' }));
+}
+function updateProgress() {
+  if (!progressEl || !scenario) return;
+  const elapsed = Math.max(0, Math.floor((Date.now() - sessionStartedAt) / 1000));
+  const mins = Math.floor(elapsed / 60);
+  const secs = String(elapsed % 60).padStart(2, '0');
+  const mode = parties === 2 ? '1:2' : '1:1';
+  progressEl.textContent = `${scenario.title} · ${mode} · turn ${userExchanges} · ${mins}:${secs}`;
+}
 function triggerDebrief() {
   if (!ws || ws.readyState !== 1) return;
-  awaitingDebrief = false;
   if (talkBtn) talkBtn.disabled = true;
-  setStatus('That’s a wrap — analyzing how you handled it…');
+  setStatus('Analyzing your session — Alex will read your debrief aloud…');
   ws.send(JSON.stringify({ type: 'lbd_debrief' }));
 }
 
-// ---- debrief -----------------------------------------------------------------
+// ---- debrief (dedicated screen — starts at top, not buried in chat scroll) ---
 function renderDebrief(data) {
   recording = false;
-  if (!data) {
-    addMsg({ cls: 'coach', who: 'Debrief', text: 'Could not analyze that round — talk a little more next time, then wrap up.' });
-    composerEl.innerHTML = `<button class="lbd-talk ghost" id="lbd-again" type="button">Try another →</button>`;
+  const body = renderDebriefHtml(data);
+  if (!body) {
+    debriefEl.innerHTML = `
+      <div class="lbd-pane-inner">
+        <button class="lbd-back" id="lbd-debrief-back" type="button">← Scenarios</button>
+        <p class="lbd-h1">Debrief</p>
+        <p class="lbd-dim">Could not analyze that round — talk a little more next time, then wrap up.</p>
+        <button class="lbd-talk ghost" id="lbd-again" type="button">Try another →</button>
+      </div>`;
+    $('lbd-debrief-back').addEventListener('click', () => { resetSession(); renderPicker(); });
     $('lbd-again').addEventListener('click', () => { resetSession(); renderPicker(); });
+    show(debriefEl);
     return;
   }
-  const moments = (data.moments || [])
-    .map((m) => `<li><span class="lbd-tag lbd-${(m.style || '').replace(/\W/g, '')}">${m.style || ''}</span> <span class="lbd-q">“${m.quote || ''}”</span><span class="lbd-note">${m.note || ''}</span></li>`)
-    .join('');
-  const alts = (data.alternatives || [])
-    .map((a) => `<li><span class="lbd-tag lbd-${(a.style || '').replace(/\W/g, '')}">${a.style || ''}</span> ${a.example || ''}</li>`)
-    .join('');
-  addMsg({ cls: 'coach', who: 'Debrief', html:
-    `<p class="lbd-score">You were mostly a <strong>${data.dominant || '—'}</strong></p>
-     <p class="lbd-dim">${FRAMEWORKS[data.dominant] ? '(' + FRAMEWORKS[data.dominant] + ')' : ''}</p>
-     <p>${data.summary || ''}</p>
-     ${moments ? `<p class="lbd-h3">Key moments</p><ul class="lbd-recap">${moments}</ul>` : ''}
-     ${alts ? `<p class="lbd-h3">How other types would play it</p><ul class="lbd-recap alts">${alts}</ul>` : ''}` });
-  composerEl.innerHTML = `
-    <button class="lbd-talk" id="lbd-replay" type="button">Run it again</button>
-    <button class="lbd-talk ghost" id="lbd-more" type="button">Try another →</button>`;
+  debriefEl.innerHTML = `
+    <div class="lbd-pane-inner">
+      <button class="lbd-back" id="lbd-debrief-back" type="button">← Scenarios</button>
+      <p class="lbd-h1">Your debrief</p>
+      <p class="lbd-dim">${scenario?.title || 'Session'} · ${parties === 2 ? '1:2' : '1:1'} · Alex read this aloud; full report below</p>
+      <div class="lbd-debrief-body">${body}</div>
+      <div class="lbd-debrief-actions">
+        <button class="lbd-talk" id="lbd-replay" type="button">Run it again</button>
+        <button class="lbd-talk ghost" id="lbd-trends" type="button">Speaking trends →</button>
+        <button class="lbd-talk ghost" id="lbd-more" type="button">Try another →</button>
+      </div>
+    </div>`;
+  $('lbd-debrief-back').addEventListener('click', () => { resetSession(); renderPicker(); });
   $('lbd-replay').addEventListener('click', () => start(scenario.id));
-  $('lbd-more').addEventListener('click', () => { resetSession(); renderPicker(); });
+  $('lbd-trends').addEventListener('click', () => { window.location.href = '/lbd/trends'; });
+  $('lbd-more').addEventListener('click', () => { resetSession(); refreshCredits().then(renderPicker); });
+  show(debriefEl);
+  debriefEl.scrollTop = 0;
+  refreshCredits();
 }
 
 // ---- helpers -----------------------------------------------------------------
 function resetSession() {
   started = false;
-  awaitingDebrief = false;
+  closing = false;
+  debriefRequested = false;
+  naturalWrap = false;
+  suppressAudio = false;
+  $('lbd-wrap')?.classList.remove('lbd-sim-wide');
+  logicRailEl = null;
+  clearInterval(progressTimer);
+  clearTimeout(recTimer);
   recording = false;
   respBubble = userBubble = null;
+  currentSpeakerMeta = {};
   stopPlayback();
   window.removeEventListener('keydown', spaceHandler);
+  if (ws) {
+    ws.onclose = null;
+    try { ws.close(); } catch {}
+    ws = null;
+    wsConnected = false;
+  }
 }
 function show(el) {
   [pickerEl, simEl, debriefEl].forEach((x) => (x.hidden = x !== el));
-  window.scrollTo(0, 0);
+  if (el === pickerEl || el === debriefEl) el.scrollTop = 0;
 }
 
 // ---- boot --------------------------------------------------------------------
 initAuthUi();
 window.addEventListener('talk2me:auth-changed', (e) => {
   signedIn = Boolean(e.detail?.signedIn);
-  setHint();
+  refreshCredits();
   if (ws?.readyState === WebSocket.OPEN) sendAuth();
   else connectVoice();
 });
 connectVoice();
-renderPicker();
+refreshCredits().then(renderPicker);

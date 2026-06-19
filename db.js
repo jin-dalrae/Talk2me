@@ -89,3 +89,77 @@ export async function appendSessionMessage(uid, sessionId, message) {
   });
   return ref;
 }
+
+export async function saveLbdDebrief(uid, data) {
+  const ref = userRef(uid).collection('lbd_sessions').doc();
+  await ref.set({
+    ...data,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function getLbdSessions(uid, limit = 60) {
+  const snap = await userRef(uid)
+    .collection('lbd_sessions')
+    .orderBy('createdAt', 'desc')
+    .limit(limit)
+    .get();
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+}
+
+export const LBD_DAILY_FREE_CREDITS = 5;
+
+function lbdUsageDayKey(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function nextUtcMidnightIso() {
+  const d = new Date();
+  const next = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+  return next.toISOString();
+}
+
+export async function getLbdCredits(uid) {
+  const day = lbdUsageDayKey();
+  const ref = userRef(uid).collection('usage').doc(`lbd-${day}`);
+  const snap = await ref.get();
+  const used = snap.exists ? Number(snap.data().lbdSimulations) || 0 : 0;
+  const limit = LBD_DAILY_FREE_CREDITS;
+  return {
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    day,
+    resetsAt: nextUtcMidnightIso(),
+  };
+}
+
+// Atomically spend one daily simulation credit. Server-only (Firestore rules block client writes).
+export async function consumeLbdCredit(uid) {
+  const day = lbdUsageDayKey();
+  const ref = userRef(uid).collection('usage').doc(`lbd-${day}`);
+  const limit = LBD_DAILY_FREE_CREDITS;
+
+  return db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const used = snap.exists ? Number(snap.data().lbdSimulations) || 0 : 0;
+    if (used >= limit) {
+      return { ok: false, limit, used, remaining: 0, day, resetsAt: nextUtcMidnightIso() };
+    }
+    const nextUsed = used + 1;
+    tx.set(
+      ref,
+      { lbdSimulations: nextUsed, day, updatedAt: FieldValue.serverTimestamp() },
+      { merge: true },
+    );
+    return {
+      ok: true,
+      limit,
+      used: nextUsed,
+      remaining: limit - nextUsed,
+      day,
+      resetsAt: nextUtcMidnightIso(),
+    };
+  });
+}

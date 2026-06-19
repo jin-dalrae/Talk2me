@@ -14,9 +14,18 @@ import {
   signOut,
   updateProfile,
 } from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
+import {
+  collection,
+  getDocs,
+  getFirestore,
+  limit,
+  orderBy,
+  query,
+} from 'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 
 const app = initializeApp(window.TALK2ME_FIREBASE_CONFIG);
 const auth = getAuth(app);
+const db = getFirestore(app);
 
 analyticsSupported()
   .then((supported) => {
@@ -85,12 +94,29 @@ export function initAuthUi() {
   renderAuthState();
 }
 
-export async function getCurrentIdToken() {
-  return currentUser ? currentUser.getIdToken() : '';
+export async function getCurrentIdToken(forceRefresh = false) {
+  return currentUser ? currentUser.getIdToken(forceRefresh) : '';
 }
 
 export function getDisplayName() {
   return currentUser?.displayName || null;
+}
+
+export function getCurrentUid() {
+  return currentUser?.uid || null;
+}
+
+/** LbD debrief sessions — readable by owner via Firestore rules (no relay required). */
+export async function fetchLbdSessions(max = 60) {
+  const uid = getCurrentUid();
+  if (!uid) return [];
+  const q = query(
+    collection(db, 'users', uid, 'lbd_sessions'),
+    orderBy('createdAt', 'desc'),
+    limit(max),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
 
 // Google provides a name automatically; email-link sign-in does not, so ask once

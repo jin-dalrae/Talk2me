@@ -13,6 +13,10 @@
         "destination": "/lbd.html"
       },
       {
+        "source": "/lbd/trends",
+        "destination": "/lbd-trends.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

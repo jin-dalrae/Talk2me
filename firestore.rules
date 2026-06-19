@@ -49,6 +49,11 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow write: if false;
       }
+
+      match /lbd_sessions/{sessionId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
     }
   }
 }

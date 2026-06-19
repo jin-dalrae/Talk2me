@@ -3,31 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lateral Leadership Flight Simulator — LbD</title>
+    <title>Speaking Trends — LbD</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..700&family=Open+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600&display=swap"
     />
-    <link rel="stylesheet" href="lbd.css?v=5" />
+    <link rel="stylesheet" href="lbd.css" />
   </head>
   <body class="lbd-page">
     <header class="lbd-auth">
-      <span class="lbd-brand">LbD · Lateral Leadership Simulator</span>
+      <span class="lbd-brand">LbD · Speaking Trends</span>
       <div class="lbd-auth-actions">
-        <a class="lbd-mini-btn lbd-nav-link" href="/lbd/trends">Speaking trends</a>
         <span id="lbd-credits" class="lbd-credits" hidden></span>
-        <span id="auth-status" class="lbd-auth-status">Sign in for live voices</span>
+        <span id="auth-status" class="lbd-auth-status">Sign in to view trends</span>
         <button id="google-signin" class="lbd-mini-btn" type="button">Sign in</button>
         <button id="signout" class="lbd-mini-btn" type="button" hidden>Sign out</button>
       </div>
     </header>
 
-    <main class="lbd-wrap" id="lbd-wrap">
-      <section id="picker" class="lbd-screen"></section>
-      <section id="sim" class="lbd-screen" hidden></section>
-      <section id="debrief" class="lbd-screen" hidden></section>
+    <main class="lbd-wrap lbd-trends-wrap">
+      <section id="trends" class="lbd-screen"></section>
     </main>
 
     <script>
@@ -42,6 +39,6 @@
       };
       window.TALK2ME_WS_URL = "wss://talk2me-relay-l2a45sbrxq-uc.a.run.app/ws";
     </script>
-    <script type="module" src="lbd.js?v=5"></script>
+    <script type="module" src="lbd-trends.js"></script>
   </body>
 </html>

@@ -25,3 +25,4 @@ Thumbs.db
 dist/
 .cache/
 .firebase/
+.gstack/

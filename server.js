@@ -5,9 +5,28 @@ import { WebSocketServer } from 'ws';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { MODEL, VOICES, PORT } from './config.js';
 import { buildSystemInstruction, getStarter } from './prompt.js';
+import {
+  buildDebriefPrompt,
+  buildDebriefSpeakPrompt,
+  buildLogicLensPrompt,
+  detectWrapUpSignal,
+  normalizeDebrief,
+  normalizeLogicLens,
+} from './public/lbd-frameworks.js';
 import { loadProfile, saveProfile, profileContext, appendTranscript } from './storage.js';
-import { ensureUser, getUserDoc, saveUserProfile, saveUserResume, startSession, appendSessionMessage } from './db.js';
-import { authenticateWebSocketRequest, verifyFirebaseIdToken, REQUIRE_FIREBASE_AUTH } from './auth.js';
+import {
+  ensureUser,
+  getUserDoc,
+  saveUserProfile,
+  saveUserResume,
+  startSession,
+  appendSessionMessage,
+  saveLbdDebrief,
+  getLbdSessions,
+  getLbdCredits,
+  consumeLbdCredit,
+} from './db.js';
+import { authenticateWebSocketRequest, verifyFirebaseIdToken, getBearerToken, REQUIRE_FIREBASE_AUTH } from './auth.js';
 
 const LOG_TRANSCRIPTS = process.env.LOG_TRANSCRIPTS === '1'; // set LOG_TRANSCRIPTS=1 to also print to console
 const LOG_TO_FILE = process.env.LOG_TO_FILE !== '0'; // transcripts → data/transcript.jsonl (on by default)
@@ -65,6 +84,15 @@ class Conversation {
     this.jobDescription = null; // interview-drill mode: pasted job description
     this.resume = null; // interview-drill mode: the user's saved resume
     this.lbd = null; // /lbd conflict simulator: { parties, a, b, situation }
+    this.lbdUserTurns = 0;
+    this.lbdIntents = [];
+    this.lbdLogicTurn = 0;
+    this.lbdClosing = false;
+    this.turnAborted = false;
+    this.speakingDebrief = false;
+    this.debriefSpeakResolve = null;
+    this.debriefSpeakTimer = null;
+    this.currentIntent = 'natural';
     this.authed = false;
     this.sessionId = null;
 
@@ -113,7 +141,10 @@ class Conversation {
   async connectAll() {
     try {
       await Promise.all(CHARACTERS.map((name) => this.connectOne(name)));
-      this.seedProfile(); // tell both coaches what we remember about the user
+      // Only coaching/free chat use durable memory. The interview drill and the
+      // conflict sim get context from the current JD/resume or scenario — never
+      // seed a former session's profile (or its role/JD) into them.
+      if (this.mode === 'coaching' || this.mode === 'free') this.seedProfile();
       this.send({ type: 'ready' });
     } catch (err) {
       console.error('Failed to open Live sessions:', err?.message || err);
@@ -162,7 +193,8 @@ class Conversation {
     }
     if (sc.outputTranscription?.text) {
       this.respTurnText = (this.respTurnText || '') + sc.outputTranscription.text;
-      this.send({ type: 'transcript', name, text: this.respTurnText });
+      const meta = this.lbdTranscriptMeta(name);
+      this.send({ type: 'transcript', name, text: this.respTurnText, ...meta });
     }
     if (sc.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
@@ -176,14 +208,39 @@ class Conversation {
     if (sc.turnComplete) {
       // Conflict simulator: keep the exchange in memory for the debrief, but
       // never persist it to the user's Firestore profile/transcript.
+      if (this.mode === 'lbd' && this.speakingDebrief) {
+        this.finishDebriefSpeak();
+        this.send({ type: 'turn_end', name, displayName: 'Alex', role: 'debrief' });
+        this.userTurnText = '';
+        this.respTurnText = '';
+        return;
+      }
+      if (this.turnAborted) {
+        this.turnAborted = false;
+        this.userTurnText = '';
+        this.respTurnText = '';
+        return;
+      }
       if (this.mode === 'lbd') {
         const ut = (this.userTurnText || '').trim();
         const rt = (this.respTurnText || '').trim();
         if (ut) this.transcript.push({ speaker: 'You', text: ut });
-        if (rt) this.transcript.push({ speaker: name, text: rt });
+        if (rt) this.transcript.push({ speaker: this.lbdSpeakerLabel(name), text: rt });
         this.seen[name] = this.transcript.length;
         this.lastSpeaker = name;
-        this.send({ type: 'turn_end', name });
+        this.send({ type: 'turn_end', name, ...this.lbdTranscriptMeta(name) });
+        if (!this.lbdClosing && rt) {
+          this.analyzeLogicLens().catch((err) =>
+            console.error('logic lens failed:', err?.message || err),
+          );
+        }
+        if (!this.lbdClosing && ut && rt) {
+          const wrap = detectWrapUpSignal(ut, {
+            userTurns: this.lbdUserTurns,
+            transcriptLines: this.transcript.length,
+          });
+          if (wrap) this.beginNaturalWrap();
+        }
         this.userTurnText = '';
         this.respTurnText = '';
         return;
@@ -221,11 +278,74 @@ class Conversation {
   // Decide who answers this turn. Heuristic for now: lean toward switching so
   // both stay active, never the same person 3x, with a little randomness.
   // Swap this out later for a smart router (e.g. classify the user's words).
+  lbdAntagonistVoice() {
+    return this.lbd?.a?.voice === 'Jeenie' ? 'Jeenie' : 'Luc';
+  }
+
+  lbdDebriefVoice() {
+    return this.lbdAntagonistVoice() === 'Jeenie' ? 'Luc' : 'Jeenie';
+  }
+
+  lbdSpeakerLabel(voice) {
+    if (voice === (this.lbd?.a?.voice === 'Jeenie' ? 'Jeenie' : 'Luc')) return this.lbd?.a?.name || voice;
+    if (voice === (this.lbd?.b?.voice === 'Jeenie' ? 'Jeenie' : 'Luc')) return this.lbd?.b?.name || voice;
+    return voice;
+  }
+
+  lbdTranscriptMeta(voice) {
+    if (this.mode !== 'lbd') return {};
+    const displayName = this.lbdSpeakerLabel(voice);
+    return {
+      displayName,
+      role: 'antagonist',
+    };
+  }
+
+  finishDebriefSpeak() {
+    if (this.debriefSpeakTimer) clearTimeout(this.debriefSpeakTimer);
+    this.debriefSpeakTimer = null;
+    this.speakingDebrief = false;
+    if (this.debriefSpeakResolve) {
+      this.debriefSpeakResolve();
+      this.debriefSpeakResolve = null;
+    }
+  }
+
+  speakDebriefAloud(data) {
+    const voice = this.lbdDebriefVoice();
+    const session = this.sessions[voice];
+    const prompt = buildDebriefSpeakPrompt(data);
+    if (!session || !prompt) return Promise.resolve();
+    this.responder = voice;
+    this.userTurnText = '';
+    this.respTurnText = '';
+    this.speakingDebrief = true;
+    this.send({ type: 'speaker', name: voice, displayName: 'Alex', role: 'debrief' });
+    return new Promise((resolve) => {
+      this.debriefSpeakResolve = resolve;
+      this.debriefSpeakTimer = setTimeout(() => {
+        this.finishDebriefSpeak();
+        this.send({ type: 'turn_end', name: voice, displayName: 'Alex', role: 'debrief' });
+      }, 90000);
+      try {
+        session.sendClientContent({
+          turns: [{ role: 'user', parts: [{ text: prompt }] }],
+          turnComplete: true,
+        });
+      } catch (e) {
+        console.error('speakDebriefAloud failed:', e?.message || e);
+        this.finishDebriefSpeak();
+        resolve();
+      }
+    });
+  }
+
   pickResponder() {
-    // Conflict simulator: 1:1 → the one counterpart (Luc); 1:2 → alternate.
     if (this.mode === 'lbd') {
-      if ((this.lbd?.parties || 1) < 2) return 'Luc';
-      return this.lastSpeaker === 'Luc' ? 'Jeenie' : 'Luc';
+      const a = this.lbdAntagonistVoice();
+      if ((this.lbd?.parties || 1) < 2) return a;
+      const b = this.lbd?.b?.voice === 'Jeenie' ? 'Jeenie' : 'Luc';
+      return this.lastSpeaker === a ? b : a;
     }
     if (!this.lastSpeaker) return this.mode === 'coaching' ? 'Jeenie' : 'Luc';
     // Interview drill: strict turns — the OTHER coach asks the next question.
@@ -251,7 +371,9 @@ class Conversation {
 
   // After a session, fold what we learned into the saved profile (cheap text model).
   async persistProfile() {
-    if (this.mode === 'lbd') return; // roleplay isn't the user's English memory
+    // Only coaching/free build durable memory. Never fold a drill's job
+    // description, resume, or roleplay into it — that leaks into later sessions.
+    if (this.mode !== 'coaching' && this.mode !== 'free') return;
     if (!REMEMBER || !this.transcript.length) return;
     const convo = this.transcript.map((e) => `${e.speaker}: ${e.text}`).join('\n');
     const current = this.profile || { name: '', summary: '', goals: [], interests: [], facts: [] };
@@ -330,13 +452,14 @@ class Conversation {
   beginLbd() {
     this.greeted = true;
     const a = this.lbd?.a;
-    const session = this.sessions['Luc'];
+    const voice = a?.voice === 'Jeenie' ? 'Jeenie' : 'Luc';
+    const session = this.sessions[voice];
     if (!a || !session) return;
-    this.responder = 'Luc';
-    this.lastSpeaker = 'Luc';
+    this.responder = voice;
+    this.lastSpeaker = voice;
     this.userTurnText = '';
     this.respTurnText = '';
-    this.send({ type: 'speaker', name: 'Luc' });
+    this.send({ type: 'speaker', name: voice, displayName: a.name, role: 'antagonist' });
     const opener = a.opening ? ` Open with something close to: "${a.opening}".` : '';
     try {
       session.sendClientContent({
@@ -348,8 +471,62 @@ class Conversation {
     }
   }
 
-  // Conflict simulator: classify the user's conflict style from the transcript
-  // and suggest how other styles would have handled the same moments.
+  // Conflict simulator: give a specific, multi-dimensional read of how the user
+  // communicated (style MIX, reasoning, the arc) — not one reductive label.
+  async analyzeLogicLens() {
+    if (this.mode !== 'lbd' || !this.transcript.length) return;
+    const lastUser = [...this.transcript].reverse().find((e) => e.speaker === 'You')?.text || '';
+    const lastFoeEntry = [...this.transcript].reverse().find((e) => e.speaker !== 'You');
+    if (!lastFoeEntry?.text) return;
+    this.lbdLogicTurn += 1;
+    try {
+      const res = await this.ai.models.generateContent({
+        model: PROFILE_MODEL,
+        contents: buildLogicLensPrompt({
+          transcript: this.transcript,
+          lastUser,
+          lastFoe: lastFoeEntry,
+          scenario: this.lbd,
+          turn: this.lbdLogicTurn,
+        }),
+        config: { responseMimeType: 'application/json' },
+      });
+      const data = normalizeLogicLens(JSON.parse(res.text));
+      if (data) this.send({ type: 'lbd_logic', data, turn: this.lbdLogicTurn });
+    } catch (e) {
+      console.error('analyzeLogicLens:', e?.message || e);
+    }
+  }
+
+  beginLbdClose() {
+    if (this.lbdClosing) return;
+    this.lbdClosing = true;
+    this.send({ type: 'lbd_wrapping', reason: 'manual' });
+    const a = this.lbd?.a;
+    const voice = a?.voice === 'Jeenie' ? 'Jeenie' : 'Luc';
+    const s = this.sessions[voice];
+    if (!a || !s) return;
+    this.responder = voice;
+    this.userTurnText = '';
+    this.respTurnText = '';
+    this.send({ type: 'speaker', name: voice, displayName: a.name, role: 'antagonist' });
+    try {
+      s.sendClientContent({
+        turns: [{ role: 'user', parts: [{ text: `The conversation is wrapping up now. In character as ${a.name}, bring it to a concrete conclusion: state the final decision or compromise you're landing on, based on how the user argued — agree to a fair middle ground if they negotiated well, or hold your position with a clear call if they didn't. One or two natural spoken sentences, then stop.` }] }],
+        turnComplete: true,
+      });
+    } catch (e) {
+      console.error('lbd_close failed:', e?.message || e);
+    }
+  }
+
+  beginNaturalWrap() {
+    if (this.lbdClosing) return;
+    this.lbdClosing = true;
+    this.send({ type: 'lbd_wrapping', reason: 'natural' });
+    this.debriefLbd();
+  }
+
   async debriefLbd() {
     const convo = this.transcript.map((e) => `${e.speaker}: ${e.text}`).join('\n');
     if (!convo) {
@@ -359,18 +536,65 @@ class Conversation {
     try {
       const res = await this.ai.models.generateContent({
         model: PROFILE_MODEL,
-        contents: `A user just practiced handling a workplace conflict by voice. In the transcript, "You" is the user — a design leader practicing lateral leadership (influence without authority). The others are counterparts pushing back.\n\nTranscript:\n${convo}\n\nAnalyze the USER's conflict-handling style. Conflict styles: Fighter (competes/forces), Negotiator (collaborates to a win-win), Diplomat (accommodates strategically), Avoider (withdraws/defers), People Pleaser (caves to keep peace). If they gave feedback, also note the model used: SBI, AID, or Radical Candor.\n\nReturn JSON ONLY with this exact shape:\n{"dominant":"<the user's main style>","summary":"<two sentences on how they handled it overall>","moments":[{"quote":"<short real quote from the user>","style":"<style that quote showed>","note":"<one sentence on its effect>"}],"alternatives":[{"style":"<a DIFFERENT style worth trying>","example":"<one sentence: what the user could have said in that style at a key moment>"}]}\n\nGive 2-3 moments and 2-3 alternatives, grounded in what the user actually said.`,
+        contents: buildDebriefPrompt({ convo, scenario: this.lbd, intents: this.lbdIntents }),
         config: { responseMimeType: 'application/json' },
       });
-      this.send({ type: 'lbd_debrief', data: JSON.parse(res.text) });
+        const data = normalizeDebrief(JSON.parse(res.text));
+        if (!data) {
+          this.send({ type: 'lbd_debrief', data: null });
+          return;
+        }
+        if (this.identity?.uid) {
+          const userQuotes = this.transcript
+            .filter((e) => e.speaker === 'You')
+            .map((e) => e.text)
+            .filter(Boolean)
+            .slice(-12);
+          saveLbdDebrief(this.identity.uid, {
+            scenarioId: this.lbd?.scenarioId || null,
+            scenarioTitle: this.lbd?.scenarioTitle || null,
+            variant: this.lbd?.variant || 'standard',
+            parties: this.lbd?.parties || 1,
+            exchangeCount: this.lbdUserTurns,
+            debrief: data,
+            userQuotes,
+            intents: this.lbdIntents?.length ? [...this.lbdIntents] : [],
+          }).catch((err) => console.error('lbd debrief save failed:', err?.message || err));
+        }
+        await this.speakDebriefAloud(data);
+        this.send({ type: 'lbd_debrief', data });
     } catch (e) {
       console.error('lbd debrief failed:', e?.message || e);
+      this.finishDebriefSpeak();
       this.send({ type: 'lbd_debrief', data: null });
     }
   }
 
   // Quietly bring a coach up to speed on what it missed since it last spoke,
   // injected as context with turnComplete:false so it does NOT trigger a reply.
+  injectLbdTurnHint(session) {
+    const text = (this.userTurnText || '').toLowerCase();
+    if (!text) return;
+    const me = this.lbdSpeakerLabel(this.responder);
+    let hint = null;
+    if (/intake|process|vp|manager|boss|report|chain|escalat|subordinate|contractor|design lead/.test(text)) {
+      hint = `(Reply as ${me} only.) The user raised process, reporting line, or escalation — answer their specific point. If they proposed intake-lite, a VP call, or a time-box, negotiate terms or agree with conditions. Do not loop generic urgency without engaging their offer.`;
+    } else if (/rapid|sprint|discovery|time.?box|\b\d+\s*(day|hour)/.test(text)) {
+      hint = `(Reply as ${me} only.) The user is shaping a fast path — engage specifics (duration, people, deliverable, what eng may continue). Move toward a concrete agreement.`;
+    } else if (/can't talk|stop fighting|not sold|hide this/.test(text)) {
+      hint = `(Reply as ${me} only.) The user is disengaging or challenging motives — de-escalate slightly, name a concrete next step (joint call, written scope, date), do not pile on pressure.`;
+    }
+    if (!hint) return;
+    try {
+      session.sendClientContent({
+        turns: [{ role: 'user', parts: [{ text: hint }] }],
+        turnComplete: false,
+      });
+    } catch (e) {
+      console.error('injectLbdTurnHint failed:', e?.message || e);
+    }
+  }
+
   catchUp(name) {
     const missed = this.transcript.slice(this.seen[name]);
     this.seen[name] = this.transcript.length;
@@ -411,10 +635,15 @@ class Conversation {
         this.respTurnText = '';
         this.turnChunks = 0;
         this.turnBytes = 0;
+        this.currentIntent = typeof m.intent === 'string' ? m.intent : 'natural';
         const s = this.sessions[this.responder];
         if (!s) return;
         this.catchUp(this.responder); // let this coach know what it missed
-        this.send({ type: 'speaker', name: this.responder });
+        if (this.mode === 'lbd') {
+          this.lbdUserTurns += 1;
+        }
+        const speakerMeta = this.mode === 'lbd' ? this.lbdTranscriptMeta(this.responder) : {};
+        this.send({ type: 'speaker', name: this.responder, ...speakerMeta });
         s.sendRealtimeInput({ activityStart: {} });
         break;
       }
@@ -429,9 +658,31 @@ class Conversation {
       }
       case 'mic_end': {
         const s = this.sessions[this.responder];
-        if (s) s.sendRealtimeInput({ activityEnd: {} });
+        if (s) {
+          if (this.mode === 'lbd') this.injectLbdTurnHint(s);
+          s.sendRealtimeInput({ activityEnd: {} });
+        }
         const ms = Math.round((this.turnBytes / 2 / 16000) * 1000);
         console.log(`  ■ ${this.responder} turn: received ${this.turnChunks} chunks, ~${ms}ms of audio`);
+        break;
+      }
+      case 'stop_speaking': {
+        if (this.speakingDebrief) {
+          this.finishDebriefSpeak();
+          this.send({ type: 'interrupted' });
+          this.send({ type: 'turn_end', name: this.responder, displayName: 'Alex', role: 'debrief' });
+          break;
+        }
+        this.turnAborted = true;
+        this.userTurnText = '';
+        this.respTurnText = '';
+        this.send({ type: 'interrupted' });
+        const stopMeta = this.mode === 'lbd' ? this.lbdTranscriptMeta(this.responder) : {};
+        this.send({ type: 'turn_end', name: this.responder, ...stopMeta });
+        break;
+      }
+      case 'lbd_close': {
+        this.beginLbdClose();
         break;
       }
       case 'lbd_debrief': {
@@ -440,38 +691,64 @@ class Conversation {
         break;
       }
       case 'mode': {
-        const mode = ['free', 'interview', 'coaching', 'lbd'].includes(m.mode) ? m.mode : 'coaching';
-        const jd = typeof m.jobDescription === 'string' ? m.jobDescription : this.jobDescription;
-        const resume = typeof m.resume === 'string' ? m.resume : this.resume;
-        const resumeChanged = resume !== this.resume;
-        const lbdChanged = mode === 'lbd' && m.lbd && JSON.stringify(m.lbd) !== JSON.stringify(this.lbd);
-        const changed =
-          mode !== this.mode ||
-          (mode === 'interview' && (jd !== this.jobDescription || resumeChanged)) ||
-          lbdChanged;
-        this.mode = mode;
-        this.jobDescription = jd;
-        this.resume = resume;
-        if (mode === 'lbd' && m.lbd) {
-          this.lbd = m.lbd;
-          this.transcript = []; // fresh scene; don't seed the counterparts with old chat
-          this.seen = { Luc: 0, Jeenie: 0 };
-        }
-        if (resumeChanged && this.identity?.uid && typeof resume === 'string') {
-          saveUserResume(this.identity.uid, resume).catch((e) =>
-            console.error('resume save failed:', e?.message || e),
-          );
-        }
-        if (changed) {
-          // System prompt changed, so re-open both sessions, then kick off the
-          // first turn of whichever drill we're entering.
-          this.reconnect().then(() => {
-            if (this.mode === 'interview') this.beginInterview();
-            else if (this.mode === 'lbd') this.beginLbd();
-          });
-        }
+        this.handleModeChange(m).catch((e) =>
+          console.error('handleModeChange failed:', e?.message || e),
+        );
         break;
       }
+    }
+  }
+
+  async handleModeChange(m) {
+    const mode = ['free', 'interview', 'coaching', 'lbd'].includes(m.mode) ? m.mode : 'coaching';
+    const jd = typeof m.jobDescription === 'string' ? m.jobDescription : this.jobDescription;
+    const resume = typeof m.resume === 'string' ? m.resume : this.resume;
+    const resumeChanged = resume !== this.resume;
+    const lbdChanged = mode === 'lbd' && m.lbd && JSON.stringify(m.lbd) !== JSON.stringify(this.lbd);
+    const changed =
+      mode !== this.mode ||
+      (mode === 'interview' && (jd !== this.jobDescription || resumeChanged)) ||
+      lbdChanged;
+
+    if (mode === 'lbd' && m.lbd && m.newSession) {
+      if (!this.identity?.uid) {
+        this.send({ type: 'lbd_denied', message: 'Sign in to use your free daily simulations.' });
+        return;
+      }
+      const credit = await consumeLbdCredit(this.identity.uid);
+      if (!credit.ok) {
+        this.send({
+          type: 'lbd_denied',
+          message: 'No free simulations left today. Credits renew at midnight UTC.',
+          credits: credit,
+        });
+        return;
+      }
+      this.send({ type: 'lbd_credits', credits: credit });
+    }
+
+    this.mode = mode;
+    this.jobDescription = jd;
+    this.resume = resume;
+    if (mode === 'lbd' && m.lbd) {
+      this.lbd = m.lbd;
+      this.lbdUserTurns = 0;
+      this.lbdIntents = [];
+      this.lbdLogicTurn = 0;
+      this.lbdClosing = false;
+      this.currentIntent = 'natural';
+      this.transcript = [];
+      this.seen = { Luc: 0, Jeenie: 0 };
+    }
+    if (resumeChanged && this.identity?.uid && typeof resume === 'string') {
+      saveUserResume(this.identity.uid, resume).catch((e) =>
+        console.error('resume save failed:', e?.message || e),
+      );
+    }
+    if (changed) {
+      await this.reconnect();
+      if (this.mode === 'interview') this.beginInterview();
+      else if (this.mode === 'lbd') this.beginLbd();
     }
   }
 
@@ -547,6 +824,27 @@ app.get('/healthz', (_req, res) => {
 
 app.get('/api/health', (_req, res) => {
   res.status(200).json({ ok: true });
+});
+
+// LbD speaking-trends dashboard (persisted debriefs in Firestore).
+app.get('/api/lbd/credits', async (req, res) => {
+  try {
+    const identity = await verifyFirebaseIdToken(getBearerToken(req), { required: true });
+    const credits = await getLbdCredits(identity.uid);
+    res.status(200).json(credits);
+  } catch (err) {
+    res.status(401).json({ error: err?.message || 'Unauthorized' });
+  }
+});
+
+app.get('/api/lbd/trends', async (req, res) => {
+  try {
+    const identity = await verifyFirebaseIdToken(getBearerToken(req), { required: true });
+    const sessions = await getLbdSessions(identity.uid);
+    res.status(200).json({ sessions });
+  } catch (err) {
+    res.status(401).json({ error: err?.message || 'Unauthorized' });
+  }
 });
 
 app.use(express.static('public'));
