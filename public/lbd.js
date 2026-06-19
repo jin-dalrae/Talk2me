@@ -89,16 +89,21 @@ function handleServer(m) {
     case 'auth_ok': wsConnected = true; break;
     case 'ready': wsConnected = true; break;
     case 'speaker':
+      // The relay also emits 'speaker' on mic_start (while YOU are still talking),
+      // so don't touch the talk button or claim they're responding here — that's
+      // what was killing "tap to send". Just note who will reply.
       currentSpeaker = m.name;
-      respBubble = null; // a new counterpart bubble starts on the first transcript chunk
-      setStatus(`${counterpartName(m.name)} is responding…`);
-      talkBtn && (talkBtn.disabled = true);
+      respBubble = null;
       break;
     case 'user_transcript':
       if (userBubble) setBubbleBody(userBubble, m.text);
       break;
     case 'transcript':
-      if (!respBubble) respBubble = addMsg({ cls: m.name === 'Jeenie' ? 'them them-b' : 'them them-a', who: counterpartName(m.name) });
+      if (!respBubble) {
+        respBubble = addMsg({ cls: m.name === 'Jeenie' ? 'them them-b' : 'them them-a', who: counterpartName(m.name) });
+        setStatus(`${counterpartName(m.name)} is responding…`);
+        if (talkBtn) talkBtn.disabled = true; // their turn now — lock the mic until turn_end
+      }
       setBubbleBody(respBubble, m.text);
       break;
     case 'audio': playPcm(bytesFromBase64(m.data)); break;
@@ -232,7 +237,7 @@ function renderPicker() {
   ).join('');
   pickerEl.innerHTML = `
     <h1 class="lbd-h1">Conflict &amp; Feedback Simulator</h1>
-    <p class="lbd-sub">Rehearse lateral leadership out loud. You speak; Luc &amp; Jeenie role-play the counterpart and push back. After a few rounds you get a debrief on your conflict style.</p>
+    <p class="lbd-sub">Rehearse lateral leadership out loud — you speak, Luc &amp; Jeenie push back in real voice, and after a few rounds you get a debrief on your conflict style. <strong>Sign-in required</strong> (the counterparts use live voice).</p>
     <div class="lbd-seg" role="radiogroup" aria-label="Number of counterparts">
       <button class="lbd-seg-btn is-on" data-parties="1" type="button">1 : 1 — one counterpart</button>
       <button class="lbd-seg-btn" data-parties="2" type="button">1 : 2 — outnumbered</button>
@@ -247,7 +252,16 @@ function renderPicker() {
     }),
   );
   pickerEl.querySelectorAll('.lbd-card').forEach((b) => b.addEventListener('click', () => start(b.dataset.id)));
-  $('lbd-hint').textContent = signedIn ? '' : 'Sign in (top right) to start — the counterparts use live voice.';
+  setHint();
+}
+
+function setHint() {
+  const h = $('lbd-hint');
+  if (!h) return;
+  h.classList.toggle('ok', signedIn);
+  h.textContent = signedIn
+    ? '✓ Signed in — pick a scenario to begin.'
+    : '🔒 You must sign in to use the simulator — tap “Sign in”, top right. The counterparts reply in live voice.';
 }
 
 // ---- simulator ---------------------------------------------------------------
@@ -257,7 +271,7 @@ function lbdPayload() {
 let chatEl = null, composerEl = null;
 
 async function start(id) {
-  if (!signedIn) { $('lbd-hint').textContent = 'Sign in (top right) first — the counterparts use live voice.'; return; }
+  if (!signedIn) { setHint(); return; }
   scenario = SCENARIOS.find((s) => s.id === id);
   userExchanges = 0;
   awaitingDebrief = false;
@@ -384,8 +398,7 @@ function show(el) {
 initAuthUi();
 window.addEventListener('talk2me:auth-changed', (e) => {
   signedIn = Boolean(e.detail?.signedIn);
-  const hint = $('lbd-hint');
-  if (hint) hint.textContent = signedIn ? '' : 'Sign in (top right) to start — the counterparts use live voice.';
+  setHint();
   if (ws?.readyState === WebSocket.OPEN) sendAuth();
   else connectVoice();
 });

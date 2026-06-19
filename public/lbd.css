@@ -263,7 +263,21 @@
 .lbd-actions { display: flex; gap: 12px; margin-top: 22px; flex-wrap: wrap; }
 
 /* --- spoken simulator: chat transcript + mic --- */
-.lbd-hint { margin-top: 14px; font-size: 13px; color: var(--lbd-gold); min-height: 16px; }
+.lbd-hint {
+  margin-top: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--lbd-gold);
+  padding: 11px 14px;
+  border: 1px solid oklch(0.83 0.16 82 / 0.4);
+  border-radius: var(--lbd-radius-sm);
+  background: oklch(0.83 0.16 82 / 0.1);
+}
+.lbd-hint.ok {
+  color: var(--lbd-primary);
+  border-color: oklch(0.88 0.21 145 / 0.4);
+  background: oklch(0.88 0.21 145 / 0.1);
+}
 
 .lbd-chat { display: flex; flex-direction: column; gap: 12px; padding: 6px 0 14px; }
 .lbd-msg { max-width: 86%; }
