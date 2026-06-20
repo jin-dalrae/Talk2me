@@ -926,6 +926,29 @@ class Conversation {
 // --- wire up express + websocket on one port ----------------------------------
 const app = express();
 
+// Firebase Hosting (talk-to-me1.web.app) calls /api/* on Cloud Run cross-origin.
+const CORS_ORIGINS = (process.env.CORS_ORIGINS ||
+  'https://talk-to-me1.web.app,https://talk2me-e90b1.web.app,https://talk2me-e90b1.firebaseapp.com,http://localhost:3000,http://127.0.0.1:3000')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin && CORS_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  }
+}
+
+app.use('/api', (req, res, next) => {
+  applyCors(req, res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
+
 app.get('/healthz', (_req, res) => {
   res.status(200).json({ ok: true });
 });
