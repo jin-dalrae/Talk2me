@@ -34,7 +34,9 @@ analyticsSupported()
   .catch(() => {});
 
 let currentUser = null;
-let menuRoot; // the #account-menu container we render into
+let menuRoot; // welcome sign-in buttons (#account-menu)
+let sessionMenuRoot; // in-call account menu (#call-account-menu)
+let activeMenuRoot; // whichever menu receives clicks / dropdown state
 let menuOpen = false;
 let lastAuthMessage = '';
 
@@ -65,12 +67,10 @@ if (isSignInWithEmailLink(auth, window.location.href)) {
   }
 }
 
-export function initAuthUi() {
-  menuRoot = document.getElementById('account-menu');
-  if (!menuRoot) return; // page has no account menu (e.g. /about)
-
-  // One delegated handler — the menu is re-rendered on every auth change.
-  menuRoot.addEventListener('click', (e) => {
+function bindMenuRoot(root) {
+  if (!root || root.dataset.authBound) return;
+  root.dataset.authBound = '1';
+  root.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;
     if (!act) return;
     if (act === 'signin') return doGoogleSignIn();
@@ -81,10 +81,19 @@ export function initAuthUi() {
       signOut(auth).catch((err) => setAuthStatus(err.message));
     }
   });
+}
+
+export function initAuthUi() {
+  menuRoot = document.getElementById('account-menu');
+  sessionMenuRoot = document.getElementById('call-account-menu');
+  if (!menuRoot && !sessionMenuRoot) return; // page has no account menu (e.g. /about)
+
+  bindMenuRoot(menuRoot);
+  bindMenuRoot(sessionMenuRoot);
 
   // Close the dropdown on outside click or Escape.
   document.addEventListener('click', (e) => {
-    if (menuOpen && menuRoot && !menuRoot.contains(e.target)) closeMenu();
+    if (menuOpen && activeMenuRoot && !activeMenuRoot.contains(e.target)) closeMenu();
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && menuOpen) closeMenu();
@@ -118,15 +127,15 @@ function toggleMenu() {
 }
 function openMenu() {
   menuOpen = true;
-  const panel = menuRoot?.querySelector('[data-menu]');
-  const btn = menuRoot?.querySelector('[data-act="toggle"]');
+  const panel = activeMenuRoot?.querySelector('[data-menu]');
+  const btn = activeMenuRoot?.querySelector('[data-act="toggle"]');
   if (panel) panel.hidden = false;
   if (btn) btn.setAttribute('aria-expanded', 'true');
 }
 function closeMenu() {
   menuOpen = false;
-  const panel = menuRoot?.querySelector('[data-menu]');
-  const btn = menuRoot?.querySelector('[data-act="toggle"]');
+  const panel = activeMenuRoot?.querySelector('[data-menu]');
+  const btn = activeMenuRoot?.querySelector('[data-act="toggle"]');
   if (panel) panel.hidden = true;
   if (btn) btn.setAttribute('aria-expanded', 'false');
 }
@@ -173,39 +182,44 @@ async function ensureDisplayName(user) {
   }
 }
 
-function isWelcomeAuth() {
-  return Boolean(menuRoot?.closest('.auth-panel, #welcome'));
+function isWelcomeSignInRoot(root) {
+  return Boolean(root?.closest('#welcome-auth, .auth-panel, #welcome'));
 }
 
-function authBtnClass() {
-  return isWelcomeAuth() ? 'secondary-action' : 'lbd-mini-btn';
+function isSessionRoot(root) {
+  return Boolean(root?.closest('.call-header-actions, .call-account'));
 }
 
-function renderAuthState() {
-  if (!menuRoot) return;
-  menuOpen = false;
-  const btn = authBtnClass();
-  const statusClass = isWelcomeAuth() ? 'auth-status' : 'lbd-auth-status lbd-menu-msg';
+function authBtnClass(root) {
+  if (isWelcomeSignInRoot(root)) return 'secondary-action';
+  if (isSessionRoot(root)) return 'call-account-btn';
+  return 'lbd-mini-btn';
+}
 
-  if (!currentUser) {
-    const signInButtons = isWelcomeAuth()
-      ? `<button class="${btn}" data-act="signin" type="button">Google</button>
-         <button class="${btn}" data-act="emaillink" type="button">Email link</button>`
-      : `<button class="${btn}" data-act="signin" type="button">Sign in</button>`;
-    menuRoot.innerHTML = `
-      ${signInButtons}
-      ${lastAuthMessage ? `<span class="${statusClass}">${escAttr(lastAuthMessage)}</span>` : ''}`;
-    return;
-  }
+function renderSignedOut(root) {
+  if (!root) return;
+  const btn = authBtnClass(root);
+  const statusClass = isWelcomeSignInRoot(root) ? 'auth-status' : 'lbd-auth-status lbd-menu-msg';
+  const signInButtons = isWelcomeSignInRoot(root)
+    ? `<button class="${btn}" data-act="signin" type="button">Google</button>
+       <button class="${btn}" data-act="emaillink" type="button">Email link</button>`
+    : `<button class="${btn}" data-act="signin" type="button">Sign in</button>`;
+  root.innerHTML = `
+    ${signInButtons}
+    ${lastAuthMessage ? `<span class="${statusClass}">${escAttr(lastAuthMessage)}</span>` : ''}`;
+}
 
+function renderSignedIn(root) {
+  if (!root) return;
+  const btn = authBtnClass(root);
   const label = currentUser.displayName || currentUser.email || 'Account';
   const initial = (label.trim()[0] || '?').toUpperCase();
-  const avatarClass = isWelcomeAuth() ? 'account-avatar-btn' : 'lbd-avatar-btn';
-  const menuClass = isWelcomeAuth() ? 'account-menu-panel' : 'lbd-menu';
-  const labelClass = isWelcomeAuth() ? 'account-menu-label' : 'lbd-menu-label';
-  const nameClass = isWelcomeAuth() ? 'account-menu-name' : 'lbd-menu-name';
-  const emailClass = isWelcomeAuth() ? 'account-menu-email' : 'lbd-menu-email';
-  menuRoot.innerHTML = `
+  const avatarClass = isSessionRoot(root) ? 'call-avatar-btn' : 'lbd-avatar-btn';
+  const menuClass = isSessionRoot(root) ? 'call-account-panel' : 'lbd-menu';
+  const labelClass = isSessionRoot(root) ? 'call-account-label' : 'lbd-menu-label';
+  const nameClass = isSessionRoot(root) ? 'call-account-name' : 'lbd-menu-name';
+  const emailClass = isSessionRoot(root) ? 'call-account-email' : 'lbd-menu-email';
+  root.innerHTML = `
     <button class="${avatarClass}" data-act="toggle" type="button"
       aria-haspopup="true" aria-expanded="false" title="${escAttr(label)}">${escAttr(initial)}</button>
     <div class="${menuClass}" data-menu hidden>
@@ -214,6 +228,30 @@ function renderAuthState() {
       <p class="${emailClass}">${escAttr(currentUser.email || '')}</p>
       <button class="${btn}" data-act="signout" type="button">Sign out</button>
     </div>`;
+}
+
+function renderAuthState() {
+  if (!menuRoot && !sessionMenuRoot) return;
+  menuOpen = false;
+
+  if (!currentUser) {
+    renderSignedOut(menuRoot);
+    if (sessionMenuRoot) sessionMenuRoot.innerHTML = '';
+    activeMenuRoot = menuRoot;
+    return;
+  }
+
+  // Signed in: welcome stays clean — account lives on session surfaces only.
+  if (menuRoot) menuRoot.innerHTML = '';
+  if (sessionMenuRoot) {
+    renderSignedIn(sessionMenuRoot);
+    activeMenuRoot = sessionMenuRoot;
+  } else if (menuRoot && !isWelcomeSignInRoot(menuRoot)) {
+    renderSignedIn(menuRoot);
+    activeMenuRoot = menuRoot;
+  } else {
+    activeMenuRoot = null;
+  }
 }
 
 function setAuthStatus(message) {

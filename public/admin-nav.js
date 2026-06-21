@@ -1,13 +1,12 @@
 import { getCurrentIdToken } from './firebase-client.js';
 import { lbdApiBase } from './lbd-credits.js';
 
-export async function maybeShowAdminLink(containerSelector = '.lbd-auth-actions, .welcome-auth-bar') {
+/** Admin nav only appears on session surfaces (LbD header, in-call header) — never the welcome screen. */
+export async function syncAdminNav(containerSelector = '.lbd-auth-actions, .call-header-actions') {
+  document.querySelectorAll('[data-admin-link]').forEach((el) => el.remove());
+
   const containers = document.querySelectorAll(containerSelector);
   if (!containers.length) return;
-
-  for (const container of containers) {
-    if (container.querySelector('[data-admin-link]')) continue;
-  }
 
   try {
     const token = await getCurrentIdToken();
@@ -20,15 +19,14 @@ export async function maybeShowAdminLink(containerSelector = '.lbd-auth-actions,
     if (!admin) return;
 
     for (const container of containers) {
-      if (container.querySelector('[data-admin-link]')) continue;
       const anchor = document.createElement('a');
-      anchor.className = container.classList.contains('welcome-auth-bar')
-        ? 'welcome-admin-link'
+      anchor.className = container.classList.contains('call-header-actions')
+        ? 'call-admin-link'
         : 'lbd-mini-btn lbd-nav-link';
       anchor.href = '/admin';
       anchor.dataset.adminLink = '1';
       anchor.textContent = 'Admin';
-      const account = container.querySelector('#account-menu, .lbd-account');
+      const account = container.querySelector('#call-account-menu, #account-menu, .lbd-account');
       if (account) container.insertBefore(anchor, account);
       else container.appendChild(anchor);
     }
@@ -36,3 +34,6 @@ export async function maybeShowAdminLink(containerSelector = '.lbd-auth-actions,
     /* not admin or offline */
   }
 }
+
+/** @deprecated use syncAdminNav */
+export const maybeShowAdminLink = syncAdminNav;

@@ -34,10 +34,8 @@
         </div>
 
         <div class="welcome-actions">
-          <div class="auth-panel" aria-label="Account">
-            <div class="welcome-auth-bar">
-              <div id="account-menu"></div>
-            </div>
+          <div id="welcome-auth" class="auth-panel" aria-label="Account">
+            <div id="account-menu"></div>
           </div>
           <button id="start" class="primary-action" hidden>
             <span class="mic-icon" aria-hidden="true"></span>
@@ -54,9 +52,9 @@
             <div class="wordmark wordmark-small" aria-label="talk2me">
               <span>talk</span><span class="wordmark-gradient">2me</span>
             </div>
-            <button class="icon-button" type="button" aria-label="Settings">
-              <span class="gear-icon" aria-hidden="true"></span>
-            </button>
+            <div class="call-header-actions">
+              <div id="call-account-menu" class="call-account"></div>
+            </div>
           </div>
           <p class="tagline">
             Talking with <span class="luc">Luc</span> &amp; <span class="jeenie">Jeenie</span><span id="name-inline"></span>

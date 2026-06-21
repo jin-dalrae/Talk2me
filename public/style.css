@@ -265,61 +265,58 @@ button {
   overflow-wrap: anywhere;
 }
 
-.welcome-auth-bar {
-  width: 100%;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-.welcome-admin-link {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--faint);
-  text-decoration: none;
-}
-
-.welcome-admin-link:hover {
-  color: var(--text);
-}
-
-#account-menu {
+#welcome-auth #account-menu {
   width: 100%;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  position: relative;
-  align-items: center;
 }
 
-#account-menu:has(.account-avatar-btn) {
-  width: auto;
-  display: block;
-}
-
-#account-menu .auth-status {
+#welcome-auth #account-menu .auth-status {
   grid-column: 1 / -1;
 }
 
-#account-menu .account-avatar-btn {
-  width: 44px;
-  height: 44px;
+.call-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.call-admin-link {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.call-admin-link:hover {
+  color: var(--text);
+}
+
+.call-account {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.call-avatar-btn {
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: 1px solid var(--outline);
   background: var(--panel);
   color: var(--text);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   cursor: pointer;
 }
 
-#account-menu .account-menu-panel {
+.call-account-panel {
   position: absolute;
   top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
+  right: 0;
   z-index: 20;
   min-width: 220px;
   padding: 12px 14px;
@@ -329,7 +326,7 @@ button {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
-#account-menu .account-menu-label {
+.call-account-label {
   display: block;
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -337,20 +334,28 @@ button {
   color: var(--faint);
 }
 
-#account-menu .account-menu-name {
+.call-account-name {
   margin: 6px 0 2px;
   font-size: 14px;
 }
 
-#account-menu .account-menu-email {
+.call-account-email {
   margin: 4px 0 12px;
   font-size: 12px;
   color: var(--faint);
   word-break: break-all;
 }
 
-#account-menu .account-menu-panel .secondary-action {
+.call-account-btn {
   width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--outline);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .secondary-action {
