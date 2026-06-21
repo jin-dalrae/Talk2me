@@ -453,12 +453,21 @@ button {
 .jd-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   margin-top: 10px;
+  width: 100%;
+}
+
+.jd-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
 }
 
 .jd-panel textarea {
   width: 100%;
+  min-height: 132px;
   resize: vertical;
   border: 1px solid var(--outline);
   border-radius: 12px;
@@ -466,8 +475,12 @@ button {
   color: var(--text);
   padding: 10px 12px;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.4;
+}
+
+.jd-panel .secondary-action {
+  width: 100%;
 }
 
 .jd-panel textarea::placeholder {
