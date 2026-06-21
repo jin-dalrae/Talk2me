@@ -173,27 +173,46 @@ async function ensureDisplayName(user) {
   }
 }
 
+function isWelcomeAuth() {
+  return menuRoot?.classList.contains('auth-actions');
+}
+
+function authBtnClass() {
+  return isWelcomeAuth() ? 'secondary-action' : 'lbd-mini-btn';
+}
+
 function renderAuthState() {
   if (!menuRoot) return;
   menuOpen = false;
+  const btn = authBtnClass();
+  const statusClass = isWelcomeAuth() ? 'auth-status' : 'lbd-auth-status lbd-menu-msg';
 
   if (!currentUser) {
+    const signInButtons = isWelcomeAuth()
+      ? `<button class="${btn}" data-act="signin" type="button">Google</button>
+         <button class="${btn}" data-act="emaillink" type="button">Email link</button>`
+      : `<button class="${btn}" data-act="signin" type="button">Sign in</button>`;
     menuRoot.innerHTML = `
-      <button class="lbd-mini-btn" data-act="signin" type="button">Sign in</button>
-      ${lastAuthMessage ? `<span class="lbd-auth-status lbd-menu-msg">${escAttr(lastAuthMessage)}</span>` : ''}`;
+      ${signInButtons}
+      ${lastAuthMessage ? `<span class="${statusClass}">${escAttr(lastAuthMessage)}</span>` : ''}`;
     return;
   }
 
   const label = currentUser.displayName || currentUser.email || 'Account';
   const initial = (label.trim()[0] || '?').toUpperCase();
+  const avatarClass = isWelcomeAuth() ? 'account-avatar-btn' : 'lbd-avatar-btn';
+  const menuClass = isWelcomeAuth() ? 'account-menu-panel' : 'lbd-menu';
+  const labelClass = isWelcomeAuth() ? 'account-menu-label' : 'lbd-menu-label';
+  const nameClass = isWelcomeAuth() ? 'account-menu-name' : 'lbd-menu-name';
+  const emailClass = isWelcomeAuth() ? 'account-menu-email' : 'lbd-menu-email';
   menuRoot.innerHTML = `
-    <button class="lbd-avatar-btn" data-act="toggle" type="button"
+    <button class="${avatarClass}" data-act="toggle" type="button"
       aria-haspopup="true" aria-expanded="false" title="${escAttr(label)}">${escAttr(initial)}</button>
-    <div class="lbd-menu" data-menu hidden>
-      <span class="lbd-menu-label">Signed in as</span>
-      ${currentUser.displayName ? `<p class="lbd-menu-name">${escAttr(currentUser.displayName)}</p>` : ''}
-      <p class="lbd-menu-email">${escAttr(currentUser.email || '')}</p>
-      <button class="lbd-mini-btn" data-act="signout" type="button">Sign out</button>
+    <div class="${menuClass}" data-menu hidden>
+      <span class="${labelClass}">Signed in as</span>
+      ${currentUser.displayName ? `<p class="${nameClass}">${escAttr(currentUser.displayName)}</p>` : ''}
+      <p class="${emailClass}">${escAttr(currentUser.email || '')}</p>
+      <button class="${btn}" data-act="signout" type="button">Sign out</button>
     </div>`;
 }
 
